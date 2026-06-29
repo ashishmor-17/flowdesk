@@ -6,6 +6,11 @@ class Settings(BaseSettings):
     """Application settings."""
 
     DATABASE_URL: SecretStr
+    JWT_SECRET: SecretStr
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRY: int = 15 #minutes
+    REFRESH_TOKEN_EXPIRY: int = 7 #days
+    REDIS_URL: str
 
     model_config = SettingsConfigDict(
         env_file=".env",
