@@ -31,3 +31,4 @@ coverage.xml
 .prettierrc.json
 setup.cfg
 .vscode
+scripts/

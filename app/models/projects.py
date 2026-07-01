@@ -48,8 +48,7 @@ class Project(Base, TimestampMixin):
 
     organization = relationship("Organization")
     creator = relationship("User")
-    tasks = relationship("Task", back_populates="project")
-
+    tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan", passive_deletes=True)
 
 Index("idx_projects_org_id", Project.org_id)
 Index("idx_projects_org_status", Project.org_id, Project.status)
