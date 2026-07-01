@@ -9,6 +9,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
+from contextlib import asynccontextmanager
 
 from app.models.users import User
 from app.models.organizations import Organization
@@ -17,6 +18,20 @@ from app.models.invitations import Invitation
 from app.core.enums import UserRole, InvitationStatus
 from app.core.errors import ErrorCode
 from app.schemas.organization import OrganizationCreate
+
+@asynccontextmanager
+async def transaction_scope(db: AsyncSession):
+    if db.in_transaction():
+        try:
+            yield
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+    else:
+        async with db.begin():
+            yield
+
 
 def slugify(text: str) -> str:
     text = unicodedata.normalize("NFKD", text)
@@ -36,7 +51,7 @@ async def create_organization(
         base_slug = str(uuid.uuid4())[:8]
 
     try:
-        async with db.begin():
+        async with transaction_scope(db):
             if org_in.slug:
                 slug = base_slug
                 existing = await db.scalar(
@@ -98,7 +113,7 @@ async def create_invitation(
         role: UserRole
 ) -> Invitation:
     
-    async with db.begin():
+    async with transaction_scope(db):
 
         existing_member = await db.scalar(
             select(OrgMember)
@@ -135,7 +150,7 @@ async def create_invitation(
         
 async def accept_invitation(db:AsyncSession, token: str) -> Invitation:
     
-    async with db.begin():
+    async with transaction_scope(db):
         invitation = await db.scalar(
             select(Invitation)
             .where(Invitation.token == token)
@@ -219,7 +234,7 @@ async def remove_org_member(
         user_to_remove_id: uuid.UUID
 ) -> None:
     
-    async with db.begin():
+    async with transaction_scope(db):
         caller = await db.scalar(
             select(OrgMember)
             .where(OrgMember.org_id == org_id,
@@ -285,7 +300,7 @@ async def delete_organization(
     caller_id: uuid.UUID
 ) -> None:
     
-    async with db.begin():
+    async with transaction_scope(db):
         caller = await db.scalar(
             select(OrgMember).where(
                 OrgMember.org_id == org_id,

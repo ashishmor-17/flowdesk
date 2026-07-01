@@ -31,4 +31,4 @@ class Organization(Base,TimestampMixin):
     )
 
     creator = relationship("User", back_populates="created_organizations")
-    members = relationship("OrgMember", back_populates="org")
+    members = relationship("OrgMember", back_populates="org", cascade="all, delete-orphan")
