@@ -68,6 +68,7 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
     creator = relationship("User", back_populates="created_tasks")
     assignees = relationship("TaskAssignee", back_populates="task", cascade="all, delete-orphan")
     labels = relationship("TaskLabel", back_populates="task", cascade="all, delete-orphan")
+    comments = relationship("Comment", back_populates="task", cascade="all, delete-orphan")
 
 Index(
     "idx_tasks_project_id", 
