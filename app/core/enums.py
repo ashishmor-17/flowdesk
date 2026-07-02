@@ -26,3 +26,10 @@ class ProjectStatus(StrEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"
     INACTIVE = "inactive"
+
+TASK_STATE_TRANSITIONS = {
+    TaskStatus.TODO: {TaskStatus.IN_PROGRESS},
+    TaskStatus.IN_PROGRESS: {TaskStatus.REVIEW, TaskStatus.DONE},
+    TaskStatus.REVIEW: {TaskStatus.IN_PROGRESS, TaskStatus.DONE},
+    TaskStatus.DONE: {TaskStatus.TODO}
+}
