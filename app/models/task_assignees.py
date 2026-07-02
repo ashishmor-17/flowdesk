@@ -41,5 +41,4 @@ class TaskAssignee(Base):
     assigner = relationship("User", foreign_keys=[assigned_by])
 
 
-# index from schema
 Index("idx_tasks_assignee", TaskAssignee.user_id)

@@ -43,3 +43,7 @@ class User(Base, TimestampMixin):
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     created_tasks = relationship("Task", back_populates="creator")
     assigned_tasks = relationship("TaskAssignee", foreign_keys="[TaskAssignee.user_id]", back_populates="user")
+    comments = relationship("Comment", back_populates="author")
+    comment_mentions = relationship("CommentMention", back_populates="mentioned_user")
+    notifications = relationship("Notification", foreign_keys="[Notification.recipient_id]", back_populates="recipient",cascade="all, delete-orphan")
+    sent_notifications = relationship("Notification", foreign_keys="[Notification.actor_id]", back_populates="actor")

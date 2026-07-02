@@ -8,6 +8,8 @@ from app.models.projects import Project
 from app.models.tasks import Task
 from app.models.task_assignees import TaskAssignee
 from app.models.task_labels import TaskLabel
+from app.models.comments import Comment, CommentMention
+from app.models.notifications import Notification
 
 
 __all__ = [
@@ -21,4 +23,7 @@ __all__ = [
     "Task",
     "TaskAssignee",
     "TaskLabel",
+    "Comment",
+    "CommentMention",
+    "Notification"
 ]
