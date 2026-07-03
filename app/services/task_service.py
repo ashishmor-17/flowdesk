@@ -8,10 +8,12 @@ from sqlalchemy.orm import selectinload
 from app.models.tasks import Task
 from app.models.task_assignees import TaskAssignee
 from app.models.org_members import OrgMember
+from app.models.users import User
 from app.schemas.tasks import *
 from app.services import project_service
-from app.services.org_service import transaction_scope
-from app.core.enums import ProjectStatus, TASK_STATE_TRANSITIONS, UserRole
+from app.core.database import transaction_scope
+from app.services.notification_service import NotificationService
+from app.core.enums import ProjectStatus, TASK_STATE_TRANSITIONS, UserRole, NotificationEntityType, NotificationType
 
 async def create_task(
         db: AsyncSession,
@@ -190,7 +192,8 @@ async def update_task_status(
         db: AsyncSession,
         org_id: uuid.UUID,
         task_id: uuid.UUID,
-        status_in: TaskStatusUpdate
+        status_in: TaskStatusUpdate,
+        caller_member: OrgMember
 ) -> Task:
     
     async with transaction_scope(db):
@@ -216,9 +219,33 @@ async def update_task_status(
                 }
             )
         
-        task.status = status_in.status
+        old_status = task.status
+        new_status = status_in.status
+        task.status = new_status
         task.version += 1
         await db.flush()
+
+        if old_status != new_status:
+            caller_user = await db.get(User, caller_member.user_id)
+            caller_name = f"{caller_user.first_name} {caller_user.last_name}" if caller_user.last_name else caller_user.first_name
+
+            for assignee in task.assignees:
+                if assignee.user_id != caller_member.user_id:
+                    NotificationService.create_notification(
+                        org_id=org_id,
+                        recipient_id=assignee.user_id,
+                        type=NotificationType.TASK_STATUS_CHANGE,
+                        actor_id=caller_member.user_id,
+                        entity_type=NotificationEntityType.TASK,
+                        entity_id=task.id,
+                        payload={
+                            "task_id": str(task.id),
+                            "task_title": task.title,
+                            "old_status": old_status,
+                            "new_status": new_status,
+                            "changed_by_name": caller_name
+                        }
+                    )
 
         return await get_task(db, org_id, task.id)
     
@@ -262,6 +289,8 @@ async def assign_task(
                 )
             
         current_assignee_ids = {a.user_id for a in task.assignees}
+        newly_assigned_ids = [uid for uid in user_ids if uid not in current_assignee_ids]
+        unassigned_ids = [uid for uid in current_assignee_ids if uid not in user_ids]
 
         task.assignees = [a for a in task.assignees if a.user_id in user_ids]
 
@@ -276,6 +305,41 @@ async def assign_task(
 
         await db.flush()
 
+        caller_user = await db.get(User, caller_member.user_id)
+        caller_name = f"{caller_user.first_name} {caller_user.last_name}" if caller_user.last_name else caller_user.first_name
+
+        for uid in newly_assigned_ids:
+            if uid != caller_member.user_id:
+                NotificationService.create_notification(
+                    org_id=org_id,
+                    recipient_id=uid,
+                    type=NotificationType.TASK_ASSIGNED,
+                    actor_id=caller_member.user_id,
+                    entity_type=NotificationEntityType.TASK,
+                    entity_id=task.id,
+                    payload={
+                        "task_id": str(task.id),
+                        "task_title": task.title,
+                        "assigned_by_name": caller_name
+                    }
+                )
+
+        for uid in unassigned_ids:
+            if uid != caller_member.user_id:
+                NotificationService.create_notification(
+                    org_id=org_id,
+                    recipient_id=uid,
+                    type=NotificationType.TASK_UNASSIGNED,
+                    actor_id=caller_member.user_id,
+                    entity_type=NotificationEntityType.TASK,
+                    entity_id=task.id,
+                    payload={
+                        "task_id": str(task.id),
+                        "task_title": task.title,
+                        "unassigned_by_name": caller_name
+                    }
+                )
+        
         return await get_task(db, org_id, task.id)
     
 async def delete_task(

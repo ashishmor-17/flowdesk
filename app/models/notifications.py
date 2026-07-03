@@ -24,22 +24,22 @@ class Notification(Base, TimestampMixin):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False
     )
-    actor_id: Mapped[uuid.UUID] = mapped_column(
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False
+        nullable=True
     )
     type: Mapped[str] = mapped_column(
         String,
         nullable=False
     )
-    entity_type: Mapped[str] = mapped_column(
+    entity_type: Mapped[str | None] = mapped_column(
         String,
-        nullable=False
+        nullable=True
     )
-    entity_id: Mapped[uuid.UUID] = mapped_column(
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        nullable=False
+        nullable=True
     )
     payload: Mapped[dict | None] = mapped_column(
         JSONB,
