@@ -13,8 +13,9 @@ from app.models.org_members import OrgMember
 from app.models.tasks import Task
 from app.schemas.comments import *
 from app.services.task_service import get_task
-from app.services.org_service import transaction_scope
-from app.core.enums import UserRole
+from app.core.database import transaction_scope
+from app.core.enums import UserRole, NotificationType, NotificationEntityType
+from app.services.notification_service import NotificationService
 
 async def extract_mentions(content: str) -> list[str]:
 
@@ -40,6 +41,7 @@ async def create_comment(
         await db.flush()
 
         usernames = await extract_mentions(payload.content)
+        mentioned_ids = []
         if usernames:
             query = (
                 select(User.id)
@@ -61,6 +63,47 @@ async def create_comment(
                     notified=notified
                 )
                 db.add(mention)
+        
+        author_user = await db.get(User, author_id)
+        author_name = f"{author_user.first_name} {author_user.last_name}" if author_user.last_name else author_user.first_name
+        preview = payload.content[:100] + ("..." if len(payload.content)>100 else "")
+
+        for user_id in mentioned_ids:
+            if user_id != author_id:
+                NotificationService.create_notification(
+                    org_id=org_id,
+                    recipient_id=user_id,
+                    type=NotificationType.MENTION,
+                    actor_id=author_id,
+                    entity_type=NotificationEntityType.COMMENT,
+                    entity_id=comment.id,
+                    payload={
+                        "comment_id": str(comment.id),
+                        "task_id": str(task.id),
+                        "task_title": task.title,
+                        "mentioned_by_name": author_name,
+                        "preview": preview
+                    }
+                )
+        
+        recipients_candidates = {task.created_by} | {a.user_id for a in task.assignees}
+        for recipient_id in recipients_candidates:
+            if recipient_id != author_id and recipient_id not in mentioned_ids:
+                NotificationService.create_notification(
+                    org_id=org_id,
+                    recipient_id=recipient_id,
+                    type=NotificationType.TASK_COMMENT_ADDED,
+                    actor_id=author_id,
+                    entity_type=NotificationEntityType.COMMENT,
+                    entity_id=comment.id,
+                    payload={
+                        "comment_id": str(comment.id),
+                        "task_id": str(task.id),
+                        "task_title": task.title,
+                        "author_name": author_name,
+                        "preview": preview
+                    }
+                )
 
         return comment
     
@@ -203,15 +246,41 @@ async def update_comment(
             if m.mentioned_user_id not in new_user_ids:
                 await db.delete(m)
         
+        newly_mentioned_ids = []
         for uid in new_user_ids:
             if uid not in existing_user_ids:
                 notified = (uid == author_id)
+                if uid != author_id:
+                    notified = True
+                    newly_mentioned_ids.append(uid)
                 new_mention = CommentMention(
                     comment_id=comment_id,
                     mentioned_user_id=uid,
                     notified=notified
                 )
                 db.add(new_mention)
+        
+        if newly_mentioned_ids:
+            task = await get_task(db, org_id, comment.task_id)
+            author_user = await db.get(User, author_id)
+            author_name = f"{author_user.first_name} {author_user.last_name}" if author_user.last_name else author_user.first_name
+            preview = payload.content[:100] + ("..." if len(payload.content) > 100 else "")
+            for user_id in newly_mentioned_ids:
+                NotificationService.create_notification(
+                    org_id=org_id,
+                    recipient_id=user_id,
+                    type=NotificationType.MENTION,
+                    actor_id=author_id,
+                    entity_type=NotificationEntityType.COMMENT,
+                    entity_id=comment.id,
+                    payload={
+                        "comment_id": str(comment.id),
+                        "task_id": str(task.id),
+                        "task_title": task.title,
+                        "mentioned_by_name": author_name,
+                        "preview": preview
+                    }
+                )
 
         return comment
     

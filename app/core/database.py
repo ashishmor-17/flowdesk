@@ -40,3 +40,16 @@ async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
             yield session
         finally:
             await session.close()
+
+@asynccontextmanager
+async def transaction_scope(db: AsyncSession):
+    if db.in_transaction():
+        try:
+            yield
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+    else:
+        async with db.begin():
+            yield

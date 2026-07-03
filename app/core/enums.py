@@ -27,6 +27,20 @@ class ProjectStatus(StrEnum):
     ARCHIVED = "archived"
     INACTIVE = "inactive"
 
+class NotificationType(StrEnum):
+    TASK_ASSIGNED = "task_assigned"
+    TASK_UNASSIGNED = "task_unassigned"
+    TASK_STATUS_CHANGE = "task_status_change"
+    TASK_COMMENT_ADDED = "task_comment_added"
+    TASK_OVERDUE = "task_overdue"
+    MENTION = "mention"
+    ORG_INVITE = "org_invite"
+
+class NotificationEntityType(StrEnum):
+    TASK = "task"
+    COMMENT = "comment"
+    INVITATION = "invitation"
+
 TASK_STATE_TRANSITIONS = {
     TaskStatus.TODO: {TaskStatus.IN_PROGRESS},
     TaskStatus.IN_PROGRESS: {TaskStatus.REVIEW, TaskStatus.DONE},

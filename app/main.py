@@ -7,6 +7,9 @@ from app.api.v1.organizations import router as org_router
 from app.api.v1.projects import router as projects_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.comments import router as comments_router
+from app.api.v1.notifications import router as notifications_router
+from app.api.v1.users import router as users_router
+
 
 app= FastAPI()
 
@@ -15,6 +18,8 @@ app.include_router(org_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(comments_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")
+app.include_router(users_router, prefix="/api/v1")
 
 @app.get("/health")
 async def health_check():

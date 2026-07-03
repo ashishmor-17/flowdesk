@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from app.models.projects import Project
 from app.models.tasks import Task
 from app.schemas.projects import *
-from app.services.org_service import transaction_scope
+from app.core.database import transaction_scope
 from app.core.errors import ErrorCode
 
 async def create_project(

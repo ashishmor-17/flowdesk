@@ -15,23 +15,11 @@ from app.models.users import User
 from app.models.organizations import Organization
 from app.models.org_members import OrgMember
 from app.models.invitations import Invitation
-from app.core.enums import UserRole, InvitationStatus
+from app.core.enums import UserRole, InvitationStatus, NotificationType, NotificationEntityType
 from app.core.errors import ErrorCode
+from app.core.database import transaction_scope
 from app.schemas.organization import OrganizationCreate
-
-@asynccontextmanager
-async def transaction_scope(db: AsyncSession):
-    if db.in_transaction():
-        try:
-            yield
-            await db.commit()
-        except Exception:
-            await db.rollback()
-            raise
-    else:
-        async with db.begin():
-            yield
-
+from app.services.notification_service import NotificationService
 
 def slugify(text: str) -> str:
     text = unicodedata.normalize("NFKD", text)
@@ -143,8 +131,28 @@ async def create_invitation(
         )
 
         db.add(invitation)
-
         await db.flush()
+
+        invited_user = await db.scalar(
+            select(User).where(User.email == email)
+        )
+        if invited_user:
+            inviter_user = await db.get(User, invited_by)
+            inviter_name = f"{inviter_user.first_name} {inviter_user.last_name}" if inviter_user.last_name else inviter_user.first_name
+            org = await db.get(Organization, org_id)
+            NotificationService.create_notification(
+                org_id=org_id,
+                recipient_id=invited_user.id,
+                type=NotificationType.ORG_INVITE,
+                actor_id=invited_by,
+                entity_type=NotificationEntityType.INVITATION,
+                entity_id=invitation.id,
+                payload={
+                    "invitation_id": str(invitation.id),
+                    "org_name": org.name,
+                    "invited_by_name": inviter_name
+                }
+            )
 
         return invitation
         

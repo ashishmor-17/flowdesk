@@ -93,7 +93,8 @@ async def update_task_status_route(
         db=db,
         org_id=org_member.org_id,
         task_id=id,
-        status_in=payload
+        status_in=payload,
+        caller_member=org_member
     )
 
 @router.patch("/{id}/assign", response_model= TaskResponse)
