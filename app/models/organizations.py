@@ -32,3 +32,5 @@ class Organization(Base,TimestampMixin):
 
     creator = relationship("User", back_populates="created_organizations")
     members = relationship("OrgMember", back_populates="org", cascade="all, delete-orphan")
+    automation_rules = relationship("AutomationRule", back_populates="org", cascade="all, delete-orphan")
+    task_events = relationship("TaskEvent", back_populates="org", cascade="all, delete-orphan")

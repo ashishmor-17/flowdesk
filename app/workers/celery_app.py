@@ -17,3 +17,10 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+celery_app.conf.beat_schedule = {
+    "check-overdue-tasks-every-5-min": {
+        "task": "check_overdue_tasks",
+        "schedule": 300.0,
+    }
+}

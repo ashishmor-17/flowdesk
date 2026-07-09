@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import String, Boolean
+from sqlalchemy import String, Boolean, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,8 +17,7 @@ class User(Base, TimestampMixin):
     email: Mapped[str] = mapped_column(
         String,
         unique=True,
-        nullable=False,
-        index=True
+        nullable=False
     )
     hashed_password: Mapped[str] = mapped_column(
         String,
@@ -47,3 +46,7 @@ class User(Base, TimestampMixin):
     comment_mentions = relationship("CommentMention", back_populates="mentioned_user")
     notifications = relationship("Notification", foreign_keys="[Notification.recipient_id]", back_populates="recipient",cascade="all, delete-orphan")
     sent_notifications = relationship("Notification", foreign_keys="[Notification.actor_id]", back_populates="actor")
+
+    __table_args__ = (
+        Index("ix_users_email", "email", unique=True),
+    )

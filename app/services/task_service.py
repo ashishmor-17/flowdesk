@@ -47,6 +47,21 @@ async def create_task(
         db.add(task)
         await db.flush()
 
+        from app.services.event_service import fire_task_event
+        await fire_task_event(
+            db=db,
+            task_id=task.id,
+            org_id=org_id,
+            event_type="TASK_CREATED",
+            actor_id=creator_id,
+            payload={
+                "task_title": task.title,
+                "project_id": str(task.project_id),
+                "priority": str(task.priority),
+                "status": str(task.status)
+            }
+        )
+
         return await get_task(db, org_id, task.id)
     
 async def list_tasks(
@@ -226,6 +241,20 @@ async def update_task_status(
         await db.flush()
 
         if old_status != new_status:
+            from app.services.event_service import fire_task_event
+            await fire_task_event(
+                db=db,
+                task_id=task.id,
+                org_id=org_id,
+                event_type="STATUS_CHANGED",
+                actor_id=caller_member.user_id,
+                payload={
+                    "old_status": str(old_status),
+                    "new_status": str(new_status),
+                    "task_title": task.title
+                }
+            )
+
             caller_user = await db.get(User, caller_member.user_id)
             caller_name = f"{caller_user.first_name} {caller_user.last_name}" if caller_user.last_name else caller_user.first_name
 
@@ -304,6 +333,20 @@ async def assign_task(
                 task.assignees.append(new_assignee)
 
         await db.flush()
+
+        if newly_assigned_ids:
+            from app.services.event_service import fire_task_event
+            await fire_task_event(
+                db=db,
+                task_id=task.id,
+                org_id=org_id,
+                event_type="TASK_ASSIGNED",
+                actor_id=caller_member.user_id,
+                payload={
+                    "newly_assigned_ids": [str(uid) for uid in newly_assigned_ids],
+                    "task_title": task.title
+                }
+            )
 
         caller_user = await db.get(User, caller_member.user_id)
         caller_name = f"{caller_user.first_name} {caller_user.last_name}" if caller_user.last_name else caller_user.first_name

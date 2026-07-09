@@ -19,8 +19,7 @@ class Project(Base, TimestampMixin):
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
+        nullable=False
     )
     name: Mapped[str] = mapped_column(
         String,
@@ -37,8 +36,7 @@ class Project(Base, TimestampMixin):
     status: Mapped[ProjectStatus] = mapped_column(
         String,
         nullable=False,
-        default=ProjectStatus.ACTIVE,
-        index=True
+        default=ProjectStatus.ACTIVE
     )
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -49,6 +47,11 @@ class Project(Base, TimestampMixin):
     organization = relationship("Organization")
     creator = relationship("User")
     tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan", passive_deletes=True)
+    automation_rules = relationship("AutomationRule", back_populates="project", cascade="all, delete-orphan")
 
-Index("idx_projects_org_id", Project.org_id)
-Index("idx_projects_org_status", Project.org_id, Project.status)
+    __table_args__ = (
+        Index("ix_projects_org_id", "org_id"),
+        Index("ix_projects_status", "status"),
+        Index("idx_projects_org_id", "org_id"),
+        Index("idx_projects_org_status", "org_id", "status"),
+    )
