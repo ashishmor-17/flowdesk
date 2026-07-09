@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import String, Date, Integer, ForeignKey, Text, Index
+from sqlalchemy import String, Date, Integer, ForeignKey, Text, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,14 +20,12 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("projects.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
+        nullable=False
     )
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id"),
-        nullable=False,
-        index=True
+        nullable=False
     )
     title: Mapped[str] = mapped_column(
         String,
@@ -40,14 +38,12 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
     status: Mapped[TaskStatus] = mapped_column(
         String,
         nullable=False,
-        default=TaskStatus.TODO,
-        index=True
+        default=TaskStatus.TODO
     )
     priority: Mapped[TaskPriority] = mapped_column(
         String,
         nullable=False,
-        default=TaskPriority.MEDIUM,
-        index=True
+        default=TaskPriority.MEDIUM
     )
     due_date: Mapped[date | None] = mapped_column(
         Date,
@@ -70,19 +66,12 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
     labels = relationship("TaskLabel", back_populates="task", cascade="all, delete-orphan")
     comments = relationship("Comment", back_populates="task", cascade="all, delete-orphan")
 
-Index(
-    "idx_tasks_project_id", 
-    Task.project_id, 
-    postgresql_where=Task.deleted_at.is_(None)
-)
-Index(
-    "idx_tasks_org_status", 
-    Task.org_id, 
-    Task.status, 
-    postgresql_where=Task.deleted_at.is_(None)
-)
-Index(
-    "idx_tasks_due_date", 
-    Task.due_date, 
-    postgresql_where=(Task.deleted_at.is_(None)) & (Task.status != 'done')
-)
+    __table_args__ = (
+        Index("ix_tasks_project_id", "project_id"),
+        Index("ix_tasks_org_id", "org_id"),
+        Index("ix_tasks_status", "status"),
+        Index("ix_tasks_priority", "priority"),
+        Index("idx_tasks_project_id", "project_id", postgresql_where=text("deleted_at IS NULL")),
+        Index("idx_tasks_org_status", "org_id", "status", postgresql_where=text("deleted_at IS NULL")),
+        Index("idx_tasks_due_date", "due_date", postgresql_where=text("deleted_at IS NULL AND status != 'done'")),
+    )

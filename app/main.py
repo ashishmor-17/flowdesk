@@ -1,5 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 
 from app.core.exceptions import http_exception_handler, unhandled_exception_handler
 from app.middleware.auth_rate_limiter import AuthRateLimitMiddleware
@@ -10,6 +9,7 @@ from app.api.v1.tasks import router as tasks_router
 from app.api.v1.comments import router as comments_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.users import router as users_router
+from app.api.v1.automation import router as automation_router
 
 from app.core.config import get_settings
 settings = get_settings()
@@ -26,6 +26,7 @@ app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(comments_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(automation_router, prefix="/api/v1")
 
 @app.get("/health")
 async def health_check():

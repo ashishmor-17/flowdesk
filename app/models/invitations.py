@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import String, ForeignKey, DateTime, func
+from sqlalchemy import String, ForeignKey, DateTime, func, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,8 +34,7 @@ class Invitation(Base, TimestampMixin):
     token: Mapped[str] = mapped_column(
         String,
         unique=True,
-        nullable=False,
-        index=True
+        nullable=False
     )
     role: Mapped[UserRole] = mapped_column(
         String,
@@ -54,3 +53,7 @@ class Invitation(Base, TimestampMixin):
 
     organization = relationship("Organization")
     inviter = relationship("User")
+
+    __table_args__ = (
+        Index("ix_invitations_token", "token", unique=True),
+    )
