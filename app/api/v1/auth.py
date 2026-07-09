@@ -5,7 +5,6 @@ from app.core.database import get_db
 from app.schemas.user import UserCreate
 from app.schemas.auth import TokenResponse, LoginRequest, RefreshRequest, LogoutRequest
 from app.services import auth_service
-from app.api.deps import login_rate_limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -13,7 +12,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def signup(user_in: UserCreate,db: AsyncSession = Depends(get_db)):
     return await auth_service.register_user(db,user_in)
 
-@router.post("/login",response_model=TokenResponse, dependencies= [Depends(login_rate_limiter)])
+@router.post("/login",response_model=TokenResponse)
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     return await auth_service.login_user(
         db,

@@ -18,6 +18,7 @@ from app.models.invitations import Invitation
 from app.core.enums import UserRole, InvitationStatus, NotificationType, NotificationEntityType
 from app.core.errors import ErrorCode
 from app.core.database import transaction_scope
+from app.core.redis import redis_client
 from app.schemas.organization import OrganizationCreate
 from app.services.notification_service import NotificationService
 
@@ -222,6 +223,9 @@ async def accept_invitation(db:AsyncSession, token: str) -> Invitation:
         db.add(member)
         await db.flush()
 
+        cache_key = f"org:{invitation.org_id}:members"
+        await redis_client.delete(cache_key)
+
         invitation.status = InvitationStatus.ACCEPTED
         return invitation
     
@@ -301,6 +305,8 @@ async def remove_org_member(
                 )
             
         await db.delete(target)
+        cache_key = f"org:{org_id}:members"
+        await redis_client.delete(cache_key)
 
 async def delete_organization(
     db: AsyncSession,
