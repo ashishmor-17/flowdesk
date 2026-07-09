@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRY: int = 7 #days
     REDIS_URL: str
 
+    ENVIRONMENT: str = "development"
+    RATE_LIMIT_ENABLED: bool = True
+    REDIS_PREFIX: str = "flowdesk"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

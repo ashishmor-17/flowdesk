@@ -53,21 +53,6 @@ async def get_current_user(
         
     return user
 
-async def login_rate_limiter(request: Request):
-    client_ip = request.client.host if request.client else "unknown"
-    key = f"rate_limit:login:{client_ip}"
-
-    current_attempts = await redis_client.incr(key)
-
-    if current_attempts == 1:
-        await redis_client.expire(key, 60)
-
-    if current_attempts > 5:
-        ttl = await redis_client.ttl(key)
-        raise HTTPException(
-            status_code= status.HTTP_429_TOO_MANY_REQUESTS,
-            detail= f"Too many login attempts. Please try again in {ttl} seconds."
-        )
     
 async def get_current_org_id(x_org_id: str = Header(..., alias="X-Org-Id")) -> uuid.UUID:
     try:
@@ -101,6 +86,9 @@ async def get_org_member(
     return member
 
 async def invite_rate_limiter(current_user: User = Depends(get_current_user)):
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+    
     key = f"rate_limit:invite:{current_user.id}"
     attempts = await redis_client.incr(key)
     if attempts == 1:
@@ -114,3 +102,22 @@ async def invite_rate_limiter(current_user: User = Depends(get_current_user)):
                 "message": f"Too many invitations sent. Please try again in {ttl} seconds."
             }
         )
+
+async def comments_rate_limter(current_user: User = Depends(get_current_user)):
+    if not settings.RATE_LIMIT_ENABLED:
+        return
+    
+    key = f"rate_limit:comment:{current_user.id}"
+    attempts = await redis_client.incr(key)
+    if attempts == 1:
+        await redis_client.expire(key,60)
+    if attempts > 30:
+        ttl = await redis_client.ttl(key)
+        raise HTTPException(
+            status_code= status.HTTP_429_TOO_MANY_REQUESTS,
+            detail= {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": f"Too many comments sent. Please try again in {ttl} seconds."
+            }
+        )
+    

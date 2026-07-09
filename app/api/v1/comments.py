@@ -7,11 +7,11 @@ from app.core.database import get_db
 from app.models.org_members import OrgMember
 from app.schemas.comments import *
 from app.services import comment_service
-from app.api.deps import get_current_user, get_org_member
+from app.api.deps import get_org_member, comments_rate_limter
 
 router = APIRouter(tags=["comments"])
 
-@router.post("/tasks/{id}/comments", response_model=CommentResponse, status_code= status.HTTP_201_CREATED)
+@router.post("/tasks/{id}/comments", response_model=CommentResponse, status_code= status.HTTP_201_CREATED, dependencies= [Depends(comments_rate_limter)])
 async def create_comment_route(
     id: uuid.UUID,
     comment_in: CommentCreate,

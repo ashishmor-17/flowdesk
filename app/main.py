@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.core.exceptions import http_exception_handler, unhandled_exception_handler
+from app.middleware.auth_rate_limiter import AuthRateLimitMiddleware
 from app.api.v1.auth import router as auth_router
 from app.api.v1.organizations import router as org_router
 from app.api.v1.projects import router as projects_router
@@ -10,6 +11,11 @@ from app.api.v1.comments import router as comments_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.users import router as users_router
 
+from app.core.config import get_settings
+settings = get_settings()
+
+if settings.ENVIRONMENT == "production" and not settings.RATE_LIMIT_ENABLED:
+    raise RuntimeError("Rate limiting cannot be disabled in production!")
 
 app= FastAPI()
 
@@ -27,3 +33,4 @@ async def health_check():
 
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
+app.add_middleware(AuthRateLimitMiddleware)

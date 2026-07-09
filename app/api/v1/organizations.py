@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.enums import UserRole
 from app.core.errors import ErrorCode
+from app.core.redis import redis_client
 from app.models.users import User
 from app.models.org_members import OrgMember
 from app.schemas.organization import *
@@ -87,6 +88,14 @@ async def list_members(
     db: AsyncSession = Depends(get_db)
 ):
     
+    cache_key = f"org:{org_id}:members"
+    try:
+        cached_data = await redis_client.get(cache_key)
+        if cached_data:
+            return OrgMembersListResponse.model_validate_json(cached_data)
+    except Exception:
+        pass
+    
     members = await org_service.get_org_members(db, org_id)
 
     def get_full_name(user: User) -> str:
@@ -94,7 +103,7 @@ async def list_members(
             return f"{user.first_name} {user.last_name}"
         return user.first_name
     
-    return OrgMembersListResponse(
+    response = OrgMembersListResponse(
         members= [
             OrgMemberResponse(
                 user_id=m.user_id,
@@ -106,6 +115,9 @@ async def list_members(
             for m in members
         ]
     )
+
+    await redis_client.set(cache_key, response.model_dump_json(), ex= 300)
+    return response
 
 @router.delete("/members/{user_id}", status_code= status.HTTP_200_OK)
 async def delete_member(
