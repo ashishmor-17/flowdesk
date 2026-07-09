@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.core.redis import redis_client
 from app.models.users import User
 from app.models.org_members import OrgMember
-from app.repositories.user_repository import get_user_by_id
+from app.repositories.user_repository import UserRepository
 
 reusable_oauth2 = HTTPBearer()
 
@@ -41,7 +41,7 @@ async def get_current_user(
     except (JWTError, ValueError):
         raise credentials_exception
         
-    user = await get_user_by_id(db, user_id)
+    user = await UserRepository.get_by_id(db, user_id)
     if user is None:
         raise credentials_exception
         

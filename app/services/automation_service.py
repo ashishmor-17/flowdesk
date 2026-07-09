@@ -1,15 +1,14 @@
 import uuid
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.automation_rules import AutomationRule
 from app.models.tasks import Task
 from app.schemas.automation import *
 from app.core.database import transaction_scope
+from app.repositories.automation_repository import AutomationRepository
 
 def validate_conditions(conditions: dict | None) -> None:
-
     if not conditions:
         return
     
@@ -30,11 +29,11 @@ async def create_rule(
         creator_id: uuid.UUID,
         rule_in: AutomationCreateRule
 ) -> AutomationRule:
-    
     validate_conditions(rule_in.conditions)
 
     async with transaction_scope(db):
-        rule = AutomationRule(
+        return await AutomationRepository.create(
+            db,
             org_id=org_id,
             project_id=rule_in.project_id,
             name=rule_in.name,
@@ -44,35 +43,20 @@ async def create_rule(
             action_payload=rule_in.action_payload,
             created_by=creator_id
         )
-        db.add(rule)
-        await db.flush()
-        return rule
     
 async def list_rules(
     db: AsyncSession,
     org_id: uuid.UUID,
     project_id: uuid.UUID | None = None
 ) -> list[AutomationRule]:
-    
-    query = select(AutomationRule).where(AutomationRule.org_id == org_id)
-    if project_id is not None:
-        query = query.where(AutomationRule.project_id == project_id)
-    
-    result = await db.scalars(query)
-    return list(result.all())
+    return await AutomationRepository.list_rules(db, org_id, project_id)
 
 async def get_rule(
     db: AsyncSession,
     org_id: uuid.UUID,
     rule_id: uuid.UUID
 ) -> AutomationRule:
-    
-    rule = await db.scalar(
-        select(AutomationRule).where(
-            AutomationRule.id == rule_id,
-            AutomationRule.org_id == org_id
-        )
-    )
+    rule = await AutomationRepository.get_by_id(db, org_id, rule_id)
     if not rule:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -89,7 +73,6 @@ async def update_rule(
     rule_id: uuid.UUID,
     rule_in: AutomationRuleUpdate
 ) -> AutomationRule:
-    
     if rule_in.conditions is not None:
         validate_conditions(rule_in.conditions)
         
@@ -109,7 +92,6 @@ async def delete_rule(
     org_id: uuid.UUID,
     rule_id: uuid.UUID
 ) -> None:
-    
     async with transaction_scope(db):
         rule = await get_rule(db, org_id, rule_id)
-        await db.delete(rule)
+        await AutomationRepository.delete(db, rule)
