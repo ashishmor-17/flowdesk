@@ -1,6 +1,7 @@
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.task_events import TaskEvent
+from app.repositories.event_repository import EventRepository
 
 async def fire_task_event(
     db: AsyncSession,
@@ -10,8 +11,8 @@ async def fire_task_event(
     actor_id: uuid.UUID | None = None,
     payload: dict | None = None
 ) -> TaskEvent:
-
-    event = TaskEvent(
+    event = await EventRepository.create(
+        db,
         task_id=task_id,
         org_id=org_id,
         event_type=event_type,
@@ -19,11 +20,7 @@ async def fire_task_event(
         payload=payload,
         processed=False
     )
-    db.add(event)
-    await db.flush()
     
-    # using 1-second countdown to ensure the current database transaction
-    # has fully committed before the worker tries to query the event.
     from app.workers.tasks import process_automation_events
     process_automation_events.apply_async(countdown=1)
     

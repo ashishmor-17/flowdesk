@@ -5,13 +5,9 @@ import secrets
 from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
-from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
-from contextlib import asynccontextmanager
+from sqlalchemy.exc import IntegrityError
 
-from app.models.users import User
 from app.models.organizations import Organization
 from app.models.org_members import OrgMember
 from app.models.invitations import Invitation
@@ -21,6 +17,8 @@ from app.core.database import transaction_scope
 from app.core.redis import redis_client
 from app.schemas.organization import OrganizationCreate
 from app.services.notification_service import NotificationService
+from app.repositories.org_repository import OrgRepository
+from app.repositories.user_repository import UserRepository
 
 def slugify(text: str) -> str:
     text = unicodedata.normalize("NFKD", text)
@@ -43,9 +41,7 @@ async def create_organization(
         async with transaction_scope(db):
             if org_in.slug:
                 slug = base_slug
-                existing = await db.scalar(
-                    select(Organization).where(Organization.slug == slug)
-                )
+                existing = await OrgRepository.get_by_slug(db, slug)
                 if existing:
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
@@ -55,12 +51,8 @@ async def create_organization(
                         }
                     )
             else:
-                existing_slugs = await db.scalars(
-                    select(Organization.slug).where(
-                        func.regexp_match(Organization.slug, f"^{base_slug}(-[0-9]+)?$") != None
-                    )
-                )
-                existing_set = set(existing_slugs.all())
+                existing_slugs = await OrgRepository.get_existing_slugs(db, base_slug)
+                existing_set = set(existing_slugs)
 
                 slug = base_slug
                 counter = 1
@@ -68,20 +60,8 @@ async def create_organization(
                     slug = f"{base_slug}-{counter}"
                     counter += 1
 
-            org = Organization(
-                name=org_in.name,
-                slug=slug,
-                created_by=creator_id
-            )
-            db.add(org)
-            await db.flush()
-
-            member = OrgMember(
-                org_id=org.id,
-                user_id=creator_id,
-                role=UserRole.OWNER
-            )
-            db.add(member)
+            org = await OrgRepository.create_organization(db, name=org_in.name, slug=slug, creator_id=creator_id)
+            await OrgRepository.create_member(db, org_id=org.id, user_id=creator_id, role=UserRole.OWNER)
             
             return org
 
@@ -101,18 +81,11 @@ async def create_invitation(
         email: str,
         role: UserRole
 ) -> Invitation:
-    
     async with transaction_scope(db):
-
-        existing_member = await db.scalar(
-            select(OrgMember)
-            .join(User)
-            .where(OrgMember.org_id == org_id, User.email == email)
-        )
-
+        existing_member = await OrgRepository.get_member_by_email(db, org_id, email)
         if existing_member:
             raise HTTPException(
-                status_code= status.HTTP_409_CONFLICT,
+                status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "code": ErrorCode.ALREADY_MEMBER,
                     "message": "This email is already a member of this organziation."
@@ -120,27 +93,21 @@ async def create_invitation(
             )
         
         token = secrets.token_urlsafe(32)
-
-        invitation = Invitation(
-            org_id= org_id,
-            invited_email= email,
+        invitation = await OrgRepository.create_invitation(
+            db,
+            org_id=org_id,
             invited_by=invited_by,
-            token=token,
+            invited_email=email,
             role=role,
-            status=InvitationStatus.PENDING,
+            token=token,
             expires_at=datetime.utcnow() + timedelta(days=7)
         )
 
-        db.add(invitation)
-        await db.flush()
-
-        invited_user = await db.scalar(
-            select(User).where(User.email == email)
-        )
+        invited_user = await UserRepository.get_by_email(db, email)
         if invited_user:
-            inviter_user = await db.get(User, invited_by)
+            inviter_user = await UserRepository.get_by_id(db, invited_by)
             inviter_name = f"{inviter_user.first_name} {inviter_user.last_name}" if inviter_user.last_name else inviter_user.first_name
-            org = await db.get(Organization, org_id)
+            org = await OrgRepository.get_by_id(db, org_id)
             NotificationService.create_notification(
                 org_id=org_id,
                 recipient_id=invited_user.id,
@@ -157,18 +124,13 @@ async def create_invitation(
 
         return invitation
         
-async def accept_invitation(db:AsyncSession, token: str) -> Invitation:
-    
+async def accept_invitation(db: AsyncSession, token: str) -> Invitation:
     async with transaction_scope(db):
-        invitation = await db.scalar(
-            select(Invitation)
-            .where(Invitation.token == token)
-        )
-
+        invitation = await OrgRepository.get_invitation_by_token(db, token)
         if not invitation:
             raise HTTPException(
-                status_code= status.HTTP_404_NOT_FOUND,
-                detail= {
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
                     "code": ErrorCode.INVITE_NOT_FOUND,
                     "message": "Invitation not found."
                 }
@@ -181,47 +143,29 @@ async def accept_invitation(db:AsyncSession, token: str) -> Invitation:
                 invitation.status = InvitationStatus.EXPIRED
 
             raise HTTPException(
-                status_code= status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": ErrorCode.INVITE_EXPIRED,
                     "message": "This invitation has expired or has already been accepted."
                 }
             )
         
-        user = await db.scalar(
-            select(User)
-            .where(User.email == invitation.invited_email)
-        )
-
+        user = await UserRepository.get_by_email(db, invitation.invited_email)
         if not user:
             raise HTTPException(
-                status_code= status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": "USER_NOT_REGISTERED",
                     "message": "Please register an account with your invited email before accepting."
                 }
             )
         
-        existing_member = await db.scalar(
-            select(OrgMember)
-            .where(
-                OrgMember.org_id == invitation.org_id,
-                OrgMember.user_id == user.id
-            )
-        )
-
+        existing_member = await OrgRepository.get_member(db, invitation.org_id, user.id)
         if existing_member:
             invitation.status = InvitationStatus.ACCEPTED
             return invitation
         
-        member = OrgMember(
-            org_id=invitation.org_id,
-            user_id=user.id,
-            role=invitation.role
-        )
-
-        db.add(member)
-        await db.flush()
+        await OrgRepository.create_member(db, org_id=invitation.org_id, user_id=user.id, role=invitation.role)
 
         cache_key = f"org:{invitation.org_id}:members"
         await redis_client.delete(cache_key)
@@ -230,14 +174,7 @@ async def accept_invitation(db:AsyncSession, token: str) -> Invitation:
         return invitation
     
 async def get_org_members(db: AsyncSession, org_id: uuid.UUID) -> list[OrgMember]:
-
-    result = await db.scalars(
-        select(OrgMember)
-        .options(selectinload(OrgMember.user))
-        .where(OrgMember.org_id == org_id)
-    )
-
-    return list(result.all())
+    return await OrgRepository.list_members(db, org_id)
 
 async def remove_org_member(
         db: AsyncSession,
@@ -245,36 +182,22 @@ async def remove_org_member(
         caller_id: uuid.UUID,
         user_to_remove_id: uuid.UUID
 ) -> None:
-    
     async with transaction_scope(db):
-        caller = await db.scalar(
-            select(OrgMember)
-            .where(OrgMember.org_id == org_id,
-                   OrgMember.user_id == caller_id
-            )
-        )
-
+        caller = await OrgRepository.get_member(db, org_id, caller_id)
         if not caller or caller.role not in [UserRole.ADMIN, UserRole.OWNER]:
             raise HTTPException(
-                status_code= status.HTTP_403_FORBIDDEN,
-                detail= {
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
                     "code": ErrorCode.FORBIDDEN,
-                    "message" : "Only organization Owner and Admins can remove members."
+                    "message": "Only organization Owner and Admins can remove members."
                 }
             )
         
-        target = await db.scalar(
-            select(OrgMember)
-            .where(
-                OrgMember.org_id == org_id,
-                OrgMember.user_id == user_to_remove_id
-            )
-        )
-
+        target = await OrgRepository.get_member(db, org_id, user_to_remove_id)
         if not target:
             raise HTTPException(
-                status_code= status.HTTP_404_NOT_FOUND,
-                detail= {
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
                     "code": "MEMBER_NOT_FOUND",
                     "message": "User is not a member of this organization."
                 }
@@ -282,29 +205,25 @@ async def remove_org_member(
         
         if caller.role == UserRole.ADMIN and target.role == UserRole.OWNER:
             raise HTTPException(
-                status_code= status.HTTP_403_FORBIDDEN,
-                detail= {
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
                     "code": ErrorCode.FORBIDDEN,
                     "message": "Admins can not remove owners."
                 }
             )
         
         if target.role == UserRole.OWNER:
-            owner_count = await db.scalar(
-                select(func.count(OrgMember.id))
-                .where(OrgMember.org_id == org_id, OrgMember.role == UserRole.OWNER)
-            )
-
-            if owner_count <=1 :
+            owner_count = await OrgRepository.get_owner_count(db, org_id)
+            if owner_count <= 1:
                 raise HTTPException(
-                    status_code= status.HTTP_400_BAD_REQUEST,
-                    detail= {
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
                         "code": "CANNOT_REMOVE_LAST_OWNER",
                         "message": "The organization must have atleast one owner."
                     }
                 )
             
-        await db.delete(target)
+        await OrgRepository.delete_member(db, target)
         cache_key = f"org:{org_id}:members"
         await redis_client.delete(cache_key)
 
@@ -313,14 +232,8 @@ async def delete_organization(
     org_id: uuid.UUID,
     caller_id: uuid.UUID
 ) -> None:
-    
     async with transaction_scope(db):
-        caller = await db.scalar(
-            select(OrgMember).where(
-                OrgMember.org_id == org_id,
-                OrgMember.user_id == caller_id
-            )
-        )
+        caller = await OrgRepository.get_member(db, org_id, caller_id)
         if not caller or caller.role != UserRole.OWNER:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -330,9 +243,7 @@ async def delete_organization(
                 }
             )
 
-        org = await db.scalar(
-            select(Organization).where(Organization.id == org_id)
-        )
+        org = await OrgRepository.get_by_id(db, org_id)
         if not org:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -342,4 +253,4 @@ async def delete_organization(
                 }
             )
 
-        await db.delete(org)
+        await OrgRepository.delete_organization(db, org)

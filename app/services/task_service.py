@@ -1,9 +1,8 @@
 import uuid
 import base64
+from datetime import date
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
-from sqlalchemy.orm import selectinload
 
 from app.models.tasks import Task
 from app.models.task_assignees import TaskAssignee
@@ -14,6 +13,7 @@ from app.services import project_service
 from app.core.database import transaction_scope
 from app.services.notification_service import NotificationService
 from app.core.enums import ProjectStatus, TASK_STATE_TRANSITIONS, UserRole, NotificationEntityType, NotificationType
+from app.repositories.task_repository import TaskRepository
 
 async def create_task(
         db: AsyncSession,
@@ -21,7 +21,6 @@ async def create_task(
         creator_id: uuid.UUID,
         task_in: TaskCreate
 ) -> Task:
-    
     async with transaction_scope(db):
         project = await project_service.get_project(db, org_id, task_in.project_id)
 
@@ -34,7 +33,8 @@ async def create_task(
                 }
             )
 
-        task = Task(
+        task = await TaskRepository.create(
+            db,
             project_id=task_in.project_id,
             org_id=org_id,
             title=task_in.title,
@@ -43,9 +43,6 @@ async def create_task(
             due_date=task_in.due_date,
             created_by=creator_id
         )
-
-        db.add(task)
-        await db.flush()
 
         from app.services.event_service import fire_task_event
         await fire_task_event(
@@ -75,134 +72,69 @@ async def list_tasks(
         cursor: str | None = None,
         limit: int = 20
 ) -> tuple[list[Task], str | None]:
-    
-    # Base query with eager loading for assignees (avoids N+1 query problem)
-    query = (
-        select(Task)
-        .where(Task.org_id == org_id, Task.deleted_at.is_(None))
-        .options(
-            selectinload(Task.assignees),
-            selectinload(Task.labels)
+    try:
+        return await TaskRepository.list_tasks(
+            db=db,
+            org_id=org_id,
+            project_id=project_id,
+            status=status,
+            priority=priority,
+            assigned_to=assigned_to,
+            due_date=due_date,
+            cursor=cursor,
+            limit=limit
         )
-        .order_by(Task.created_at.desc(), Task.id.desc())
-    )
-
-    if project_id:
-        query = query.where(Task.project_id == project_id)
-
-    if status:
-        query = query.where(Task.status == status)
-
-    if priority:
-        query = query.where(Task.priority == priority)
-
-    if due_date:
-        query = query.where(Task.due_date == due_date)
-
-    if assigned_to:
-        query = query.join(Task.assignees).where(TaskAssignee.user_id == assigned_to)
-
-    if cursor:
-        try:
-            decoded = base64.b64decode(cursor.encode()).decode()
-            cursor_time_str, cursor_id_str = decoded.split("_")
-            cursor_time = datetime.fromisoformat(cursor_time_str)
-            cursor_id = uuid.UUID(cursor_id_str)
-
-            query = query.where(
-                or_(
-                    Task.created_at < cursor_time,
-                    and_(
-                        Task.created_at == cursor_time,
-                        Task.id < cursor_id
-                    )
-                )
-            )
-        except Exception:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "code": "INVALID_CURSOR",
-                    "message": "Invalid pagination cursor"
-                }
-            )
-        
-    result = await db.execute(query.limit(limit + 1))
-    tasks = list(result.scalars().all())  # Note the parenthesis here!
-
-    next_cursor = None
-
-    if len(tasks) > limit:
-        tasks = tasks[:limit]
-        last_task = tasks[-1]
-
-        cursor_str = f"{last_task.created_at.isoformat()}_{last_task.id}"
-        next_cursor = base64.b64encode(cursor_str.encode()).decode()
-
-    return tasks, next_cursor
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_CURSOR",
+                "message": str(e)
+            }
+        )
 
 async def get_task(
         db: AsyncSession,
         org_id: uuid.UUID,
         task_id: uuid.UUID
 ) -> Task:
-    
-    query = (
-        select(Task)
-        .where(
-            Task.id == task_id,
-            Task.org_id == org_id,
-            Task.deleted_at.is_(None)
-        )
-        .options(
-            selectinload(Task.assignees),
-            selectinload(Task.labels)
-        )
-    )
-
-    result = await db.execute(query)
-    task = result.scalars().first()
-
+    task = await TaskRepository.get_by_id(db, org_id, task_id)
     if not task:
         raise HTTPException(
-            status_code= status.HTTP_404_NOT_FOUND,
-            detail= {
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
                 "code": "TASK_NOT_FOUND",
-                "message": "Task not found."
+                "message": "Task not found or you do not have access."
             }
         )
-    
     return task
-
 async def update_task(
         db: AsyncSession,
         org_id: uuid.UUID,
         task_id: uuid.UUID,
         task_in: TaskUpdate
 ) -> Task:
-    
     async with transaction_scope(db):
         task = await get_task(db, org_id, task_id)
 
         if task.version != task_in.version:
             raise HTTPException(
-                status_code= status.HTTP_409_CONFLICT,
-                detail= {
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
                     "code": "VERSION_MISMATCH",
-                    "message": "Task has been updated by another user. Please refresh and try again."
+                    "message": "Task has been updated by another user."
                 }
             )
-        
-        update_data = task_in.model_dump(exclude_unset=True, exclude={"version"})
+
+        update_data = task_in.model_dump(exclude_unset=True)
+        update_data.pop("version", None)
         for field, value in update_data.items():
             setattr(task, field, value)
 
-        task.version +=1
-
+        task.version += 1
         await db.flush()
-
         return await get_task(db, org_id, task.id)
-    
+
 async def update_task_status(
         db: AsyncSession,
         org_id: uuid.UUID,
@@ -210,32 +142,30 @@ async def update_task_status(
         status_in: TaskStatusUpdate,
         caller_member: OrgMember
 ) -> Task:
-    
     async with transaction_scope(db):
         task = await get_task(db, org_id, task_id)
 
+        new_status = status_in.status
+        old_status = TaskStatus(task.status)
+
         if task.version != status_in.version:
             raise HTTPException(
-                status_code= status.HTTP_409_CONFLICT,
-                detail= {
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
                     "code": "VERSION_MISMATCH",
-                    "message": "Task has been updated by another user. Please refresh and try again."
+                    "message": "Task has been updated by another user."
                 }
             )
-        
-        allowed_next_states = TASK_STATE_TRANSITIONS.get(task.status, set())
 
-        if status_in.status not in allowed_next_states:
+        if new_status not in TASK_STATE_TRANSITIONS[old_status]:
             raise HTTPException(
-                status_code= status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail= {
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
                     "code": "INVALID_STATUS_TRANSITION",
-                    "message": f"Can not transition task from {task.status.upper()} to {status_in.status.upper()}."
+                    "message": f"Cannot transition task from {old_status} to {new_status}."
                 }
             )
-        
-        old_status = task.status
-        new_status = status_in.status
+
         task.status = new_status
         task.version += 1
         await db.flush()
@@ -285,7 +215,6 @@ async def assign_task(
         payload: TaskAssignUpdate,
         caller_member: OrgMember
 ) -> Task:
-    
     async with transaction_scope(db):
         task = await get_task(db, org_id, task_id)
         user_ids = payload.user_ids
@@ -301,12 +230,7 @@ async def assign_task(
             )
         
         if user_ids:
-            query = select(OrgMember.user_id).where(
-                OrgMember.org_id == org_id,
-                OrgMember.user_id.in_(user_ids)
-            )
-            result = await db.execute(query)
-            existing_member_ids = set(result.scalars().all())
+            existing_member_ids = await TaskRepository.check_members_exist(db, org_id, user_ids)
 
             if (len(existing_member_ids) != len(set(user_ids))):
                 raise HTTPException(
@@ -391,7 +315,6 @@ async def delete_task(
         task_id: uuid.UUID,
         caller_member: OrgMember
 ) -> None:
-    
     async with transaction_scope(db):
         if caller_member.role not in [UserRole.ADMIN, UserRole.OWNER]:
             raise HTTPException(
@@ -403,7 +326,5 @@ async def delete_task(
             )
         
         task = await get_task(db, org_id, task_id)
-
         task.soft_delete()
         await db.flush()
-
