@@ -36,11 +36,16 @@ class NotificationType(StrEnum):
     MENTION = "mention"
     ORG_INVITE = "org_invite"
     AUTOMATION = "automation"
+    SLA_WARNING = "sla_warning"
+    SLA_BREACHED = "sla_breached"
+    APPROVAL_REQUESTED = "approval_requested"
+    APPROVAL_DECIDED = "approval_decided"
 
 class NotificationEntityType(StrEnum):
     TASK = "task"
     COMMENT = "comment"
     INVITATION = "invitation"
+    APPROVAL_REQUEST = "approval_request"
 
 class AutomationTriggerEvent(StrEnum):
     TASK_CREATED = "TASK_CREATED"

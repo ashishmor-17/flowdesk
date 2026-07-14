@@ -13,7 +13,10 @@ from app.models.teams import Team
 from app.models.team_members import TeamMember
 from app.schemas.teams import TeamCreate, TeamResponse, TeamMemberAdd, TeamMemberResponse
 from app.schemas.organization import *
-from app.services import org_service, team_service
+from app.services import org_service, team_service, sla_service
+from app.schemas.sla import SLAPolicyCreate, SLAPolicyResponse
+from app.schemas.audit_log import AuditLogResponse
+from app.services.audit_service import AuditService
 from app.api.deps import (
     get_current_user,
     get_current_org_id,
@@ -185,3 +188,44 @@ async def delete_team(
     db: AsyncSession = Depends(get_db)
 ):
     await team_service.delete_team(db, id, org_member)
+
+@router.post("/sla-policies", response_model=SLAPolicyResponse, status_code=status.HTTP_201_CREATED)
+async def create_sla_policy(
+    payload: SLAPolicyCreate,
+    org_member: OrgMember = Depends(get_org_member),
+    db: AsyncSession = Depends(get_db)
+):
+    if org_member.role not in [UserRole.ADMIN, UserRole.OWNER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ErrorCode.FORBIDDEN,
+                "message": "Only organization Owner and Admins can manage SLA policies."
+            }
+        )
+    policy = await sla_service.create_sla_policy(db, org_member.org_id, payload)
+    return SLAPolicyResponse.model_validate(policy)
+
+@router.get("/sla-policies", response_model=list[SLAPolicyResponse], status_code=status.HTTP_200_OK)
+async def list_sla_policies(
+    org_member: OrgMember = Depends(get_org_member),
+    db: AsyncSession = Depends(get_db)
+):
+    policies = await sla_service.list_sla_policies(db, org_member.org_id)
+    return [SLAPolicyResponse.model_validate(p) for p in policies]
+
+
+@router.get("/audit-logs", response_model=list[AuditLogResponse], status_code=status.HTTP_200_OK)
+async def list_audit_logs_route(
+    org_member: OrgMember = Depends(get_org_member),
+    db: AsyncSession = Depends(get_db)
+):
+    if org_member.role not in [UserRole.ADMIN, UserRole.OWNER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ErrorCode.FORBIDDEN,
+                "message": "Only organizations Owner and Admins can view audit logs."
+            }
+        )
+    return await AuditService.list_org_audit_logs(db, org_member.org_id)

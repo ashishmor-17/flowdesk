@@ -3,13 +3,10 @@ import re
 from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
-from app.models.comments import Comment, CommentMention
-from app.models.users import User
+from app.models.comments import Comment
 from app.models.org_members import OrgMember
-from app.models.org_members import OrgMember
-from app.schemas.comments import *
+from app.schemas.comments import CommentCreate, CommentUpdate
 from app.services.task_service import get_task
 from app.core.database import transaction_scope
 from app.core.enums import UserRole, NotificationType, NotificationEntityType
@@ -17,6 +14,7 @@ from app.services.notification_service import NotificationService
 from app.repositories.comment_repository import CommentRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.task_watcher_repository import TaskWatcherRepository
+from app.services.audit_service import AuditService
 
 async def extract_mentions(content: str) -> list[str]:
     return re.findall(r'@([a-zA-Z0-9_.-]+)', content)
@@ -41,16 +39,7 @@ async def create_comment(
         usernames = await extract_mentions(payload.content)
         mentioned_ids = []
         if usernames:
-            query = (
-                select(User.id)
-                .join(OrgMember, OrgMember.user_id == User.id)
-                .where(
-                    OrgMember.org_id == org_id,
-                    func.split_part(User.email, "@", 1).in_(usernames)
-                )
-            )
-            res = await db.execute(query)
-            mentioned_ids = [row[0] for row in res.all()]
+            mentioned_ids = await CommentRepository.get_mentioned_user_ids_by_usernames(db, org_id, usernames)
 
             for user_id in mentioned_ids:
                 notified = (user_id == author_id)
@@ -104,6 +93,16 @@ async def create_comment(
                         "preview": preview
                     }
                 )
+
+        await AuditService.create_log(
+            db=db,
+            org_id=org_id,
+            actor_id=author_id,
+            action="COMMENT_CREATED",
+            entity_type="task",
+            entity_id=task_id,
+            new_value={"comment_id": str(comment.id), "content": payload.content}
+        )
 
         return comment
     
@@ -179,27 +178,16 @@ async def update_comment(
         usernames = await extract_mentions(payload.content)
         mentioned_ids = []
         if usernames:
-            query = (
-                select(User.id)
-                .join(OrgMember, OrgMember.user_id == User.id)
-                .where(
-                    OrgMember.org_id == org_id,
-                    func.split_part(User.email, "@", 1).in_(usernames)
-                )
-            )
-            res = await db.execute(query)
-            mentioned_ids = [row[0] for row in res.all()]
+            mentioned_ids = await CommentRepository.get_mentioned_user_ids_by_usernames(db, org_id, usernames)
 
-        existing_query = select(CommentMention).where(CommentMention.comment_id == comment_id)
-        existing_res = await db.execute(existing_query)
-        existing_mentions = list(existing_res.scalars().all())
+        existing_mentions = await CommentRepository.get_mentions_for_comment(db, comment_id)
 
         existing_user_ids = {m.mentioned_user_id for m in existing_mentions}
         new_user_ids = set(mentioned_ids)
 
         for m in existing_mentions:
             if m.mentioned_user_id not in new_user_ids:
-                await db.delete(m)
+                await CommentRepository.delete_mention(db, m)
         
         newly_mentioned_ids = []
         for uid in new_user_ids:
@@ -262,4 +250,13 @@ async def delete_comment(
             )
         
         if not comment.deleted_at:
+            await AuditService.create_log(
+                db=db,
+                org_id=org_id,
+                actor_id=caller_member.user_id,
+                action="COMMENT_DELETED",
+                entity_type="task",
+                entity_id=comment.task_id,
+                old_value={"comment_id": str(comment.id)}
+            )
             comment.deleted_at = datetime.now(timezone.utc)

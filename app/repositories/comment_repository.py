@@ -1,10 +1,12 @@
 import uuid
 import base64
 from datetime import datetime
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.comments import Comment, CommentMention
+from app.models.users import User
+from app.models.org_members import OrgMember
 
 class CommentRepository:
     @staticmethod
@@ -45,7 +47,6 @@ class CommentRepository:
 
     @staticmethod
     async def get_by_id(db: AsyncSession, comment_id: uuid.UUID) -> Comment | None:
-        
         return await db.get(Comment, comment_id)
 
     @staticmethod
@@ -55,7 +56,6 @@ class CommentRepository:
         limit: int = 20,
         cursor: str | None = None
     ) -> tuple[list[Comment], str | None]:
-        
         query = (
             select(Comment)
             .where(Comment.task_id == task_id)
@@ -99,5 +99,34 @@ class CommentRepository:
 
     @staticmethod
     async def delete(db: AsyncSession, comment: Comment) -> None:
-        
         await db.delete(comment)
+
+    @staticmethod
+    async def get_mentioned_user_ids_by_usernames(
+        db: AsyncSession,
+        org_id: uuid.UUID,
+        usernames: list[str]
+    ) -> list[uuid.UUID]:
+        query = (
+            select(User.id)
+            .join(OrgMember, OrgMember.user_id == User.id)
+            .where(
+                OrgMember.org_id == org_id,
+                func.split_part(User.email, "@", 1).in_(usernames)
+            )
+        )
+        res = await db.execute(query)
+        return [row[0] for row in res.all()]
+
+    @staticmethod
+    async def get_mentions_for_comment(
+        db: AsyncSession,
+        comment_id: uuid.UUID
+    ) -> list[CommentMention]:
+        query = select(CommentMention).where(CommentMention.comment_id == comment_id)
+        res = await db.execute(query)
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def delete_mention(db: AsyncSession, mention: CommentMention) -> None:
+        await db.delete(mention)

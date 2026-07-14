@@ -5,3 +5,4 @@ __pycache__
 *.pyc
 *.pyo
 celery_smoke_test.log
+localstack-data/

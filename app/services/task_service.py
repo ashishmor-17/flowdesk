@@ -14,12 +14,15 @@ from app.schemas.tasks import *
 from app.services import project_service
 from app.core.database import transaction_scope
 from app.services.notification_service import NotificationService
+from app.services import sla_service
 from app.core.enums import ProjectStatus, TASK_STATE_TRANSITIONS, UserRole, NotificationEntityType, NotificationType
 from app.repositories.task_repository import TaskRepository
 from app.repositories.project_status_repository import ProjectStatusRepository
 from app.repositories.workflow_rule_repository import WorkflowRuleRepository
 from app.repositories.task_watcher_repository import TaskWatcherRepository
 from app.repositories.team_repository import TeamRepository
+from app.repositories.user_repository import UserRepository
+from app.services.audit_service import AuditService
 
 async def create_task(
         db: AsyncSession,
@@ -64,6 +67,23 @@ async def create_task(
                 "status": str(task.status)
             }
         )
+
+        await AuditService.create_log(
+            db=db,
+            org_id=org_id,
+            actor_id=creator_id,
+            action="TASK_CREATED",
+            entity_type="task",
+            entity_id=task.id,
+            new_value={
+                "title": task.title,
+                "project_id": str(task.project_id),
+                "priority": str(task.priority),
+                "status": str(task.status)
+            }
+        )
+
+        await sla_service.check_and_create_sla_timer(db, org_id, task)
 
         return await get_task(db, org_id, task.id)
     
@@ -119,7 +139,8 @@ async def update_task(
         db: AsyncSession,
         org_id: uuid.UUID,
         task_id: uuid.UUID,
-        task_in: TaskUpdate
+        task_in: TaskUpdate,
+        actor_id: uuid.UUID = None
 ) -> Task:
     async with transaction_scope(db):
         task = await get_task(db, org_id, task_id)
@@ -133,6 +154,13 @@ async def update_task(
                 }
             )
 
+        old_value = {
+            "title": task.title,
+            "description": task.description,
+            "priority": task.priority,
+            "due_date": str(task.due_date) if task.due_date else None,
+        }
+
         update_data = task_in.model_dump(exclude_unset=True)
         update_data.pop("version", None)
         for field, value in update_data.items():
@@ -140,6 +168,25 @@ async def update_task(
 
         task.version += 1
         await db.flush()
+
+        new_value = {
+            "title": task.title,
+            "description": task.description,
+            "priority": task.priority,
+            "due_date": str(task.due_date) if task.due_date else None,
+        }
+
+        await AuditService.create_log(
+            db=db,
+            org_id=org_id,
+            actor_id=actor_id,
+            action="TASK_UPDATED",
+            entity_type="task",
+            entity_id=task.id,
+            old_value=old_value,
+            new_value=new_value
+        )
+
         return await get_task(db, org_id, task.id)
 
 async def update_task_status(
@@ -209,9 +256,23 @@ async def update_task_status(
 
         task.status = new_status
         task.version += 1
+        
+        await sla_service.update_sla_timer_status(db, task)
+        
         await db.flush()
 
         if old_status != new_status:
+            await AuditService.create_log(
+                db=db,
+                org_id=org_id,
+                actor_id=caller_member.user_id,
+                action="TASK_STATUS_CHANGED",
+                entity_type="task",
+                entity_id=task.id,
+                old_value={"status": old_status},
+                new_value={"status": new_status}
+            )
+
             from app.services.event_service import fire_task_event
             await fire_task_event(
                 db=db,
@@ -226,7 +287,7 @@ async def update_task_status(
                 }
             )
 
-            caller_user = await db.get(User, caller_member.user_id)
+            caller_user = await UserRepository.get_by_id(db, caller_member.user_id)
             caller_name = caller_user.full_name or caller_user.email
 
             recipients = {a.user_id for a in task.assignees if a.user_id is not None}
@@ -312,7 +373,7 @@ async def assign_task(
         current_user_ids = {a.user_id for a in task.assignees if a.assignee_type == "USER"}
         current_team_ids = {a.team_id for a in task.assignees if a.assignee_type == "TEAM"}
 
-        caller_user = await db.get(User, caller_member.user_id)
+        caller_user = await UserRepository.get_by_id(db, caller_member.user_id)
         caller_name = caller_user.full_name or caller_user.email
 
         for uid in user_ids:
@@ -382,6 +443,19 @@ async def assign_task(
             }
         )
 
+        await AuditService.create_log(
+            db=db,
+            org_id=org_id,
+            actor_id=caller_member.user_id,
+            action="TASK_ASSIGNED",
+            entity_type="task",
+            entity_id=task.id,
+            metadata={
+                "assigned_users": [str(uid) for uid in user_ids],
+                "assigned_teams": [str(tid) for tid in team_ids]
+            }
+        )
+
         return await get_task(db, org_id, task_id)    
     
 async def delete_task(
@@ -402,6 +476,15 @@ async def delete_task(
             )
         
         task = await get_task(db, org_id, task_id)
+        await AuditService.create_log(
+            db=db,
+            org_id=org_id,
+            actor_id=caller_member.user_id,
+            action="TASK_DELETED",
+            entity_type="task",
+            entity_id=task.id,
+            old_value={"title": task.title}
+        )
         task.soft_delete()
         await db.flush()
 
@@ -441,7 +524,7 @@ async def add_task_assignee(
                 )
                 task.assignees.append(new_assignee)
                 if user_id != caller_member.user_id:
-                    caller_user = await db.get(User, caller_member.user_id)
+                    caller_user = await UserRepository.get_by_id(db, caller_member.user_id)
                     caller_name = caller_user.full_name or caller_user.email
                     NotificationService.create_notification(
                         org_id=org_id,
@@ -482,7 +565,7 @@ async def add_task_assignee(
                 )
                 task.assignees.append(new_assignee)
                 team_member_ids = await TeamRepository.list_member_ids(db, team_id)
-                caller_user = await db.get(User, caller_member.user_id)
+                caller_user = await UserRepository.get_by_id(db, caller_member.user_id)
                 caller_name = caller_user.full_name or caller_user.email
                 for member_uid in team_member_ids:
                     if member_uid != caller_member.user_id:

@@ -3,8 +3,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.automation_rules import AutomationRule
+from app.models.automation_history import AutomationHistory
 from app.models.tasks import Task
-from app.schemas.automation import *
+from app.schemas.automation import AutomationCreateRule, AutomationRuleUpdate
 from app.core.database import transaction_scope
 from app.repositories.automation_repository import AutomationRepository
 
@@ -95,3 +96,12 @@ async def delete_rule(
     async with transaction_scope(db):
         rule = await get_rule(db, org_id, rule_id)
         await AutomationRepository.delete(db, rule)
+
+
+async def get_rule_history(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    rule_id: uuid.UUID
+) -> list[AutomationHistory]:
+    rule = await get_rule(db, org_id, rule_id)
+    return await AutomationRepository.list_history(db, rule.id)

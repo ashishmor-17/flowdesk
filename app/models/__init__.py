@@ -21,6 +21,14 @@ from app.models.workflow_rules import WorkflowRule
 from app.models.task_watchers import TaskWatcher
 from app.models.task_attachments import TaskAttachment
 from app.models.upload_sessions import UploadSession
+from app.models.sla_policies import SLAPolicy
+from app.models.sla_timers import SLATimer
+from app.models.automation_history import AutomationHistory
+from app.models.approval_requests import ApprovalRequest
+from app.models.time_entries import TimeEntry
+from app.models.task_links import TaskLink
+from app.models.audit_log import AuditLog
+from app.models.activity_log import ActivityLog
 
 __all__ = [
     "Base",
@@ -46,5 +54,13 @@ __all__ = [
     "WorkflowRule",
     "TaskWatcher",
     "TaskAttachment",
-    "UploadSession"
+    "UploadSession",
+    "SLAPolicy",
+    "SLATimer",
+    "AutomationHistory",
+    "ApprovalRequest",
+    "TimeEntry",
+    "TaskLink",
+    "AuditLog",
+    "ActivityLog"
 ]
