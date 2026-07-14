@@ -23,8 +23,8 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 
-from app.models.base import Base
-target_metadata = Base.metadata
+import app.models
+target_metadata = app.models.Base.metadata
 
 from app.core.config import get_settings
 settings = get_settings()

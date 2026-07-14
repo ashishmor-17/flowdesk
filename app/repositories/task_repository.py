@@ -21,7 +21,11 @@ class TaskRepository:
             .where(Task.org_id == org_id, Task.id == task_id, Task.deleted_at.is_(None))
             .options(
                 selectinload(Task.assignees),
-                selectinload(Task.labels)
+                selectinload(Task.labels),
+                selectinload(Task.sla_timer),
+                selectinload(Task.time_entries),
+                selectinload(Task.outbound_links),
+                selectinload(Task.inbound_links)
             )
         )
         result = await db.execute(query)
@@ -45,7 +49,11 @@ class TaskRepository:
             .where(Task.org_id == org_id, Task.deleted_at.is_(None))
             .options(
                 selectinload(Task.assignees),
-                selectinload(Task.labels)
+                selectinload(Task.labels),
+                selectinload(Task.sla_timer),
+                selectinload(Task.time_entries),
+                selectinload(Task.outbound_links),
+                selectinload(Task.inbound_links)
             )
             .order_by(Task.created_at.desc(), Task.id.desc())
         )

@@ -13,9 +13,17 @@ from app.core.database import get_db
 from app.api.deps import get_org_member
 from app.models.org_members import OrgMember
 from app.schemas.tasks import *
+from app.schemas.approval import ApprovalRequestCreate, ApprovalRequestDecision, ApprovalRequestResponse
+from app.schemas.time_entry import TimeEntryCreate, TimeEntryResponse
+from app.schemas.task_link import TaskLinkCreate, TaskLinkResponse
+from app.schemas.activity_log import ActivityLogResponse
 from app.services import task_service
 from app.services import attachment_service
 from app.services import upload_session_service
+from app.services import approval_service
+from app.services import time_entry_service
+from app.services import task_link_service
+from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -85,7 +93,8 @@ async def update_task_route(
         db=db,
         org_id=org_member.org_id,
         task_id=id,
-        task_in=payload
+        task_in=payload,
+        actor_id=org_member.user_id
     )
 
 @router.patch("/{id}/status", response_model=TaskResponse)
@@ -378,3 +387,112 @@ async def get_upload_session_progress_route(
         parts_uploaded=progress["parts_uploaded"],
         expires_at=progress["expires_at"]
     )
+
+
+@router.post("/{id}/approvals", response_model=ApprovalRequestResponse, status_code=status.HTTP_201_CREATED)
+async def create_approval_route(
+    id: uuid.UUID,
+    payload: ApprovalRequestCreate,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    return await approval_service.create_approval_request(
+        db=db,
+        org_id=org_member.org_id,
+        task_id=id,
+        requestor_id=org_member.user_id,
+        approver_id=payload.approver_id
+    )
+
+
+@router.patch("/{id}/approvals/{approval_id}", response_model=ApprovalRequestResponse)
+async def decide_approval_route(
+    id: uuid.UUID,
+    approval_id: uuid.UUID,
+    payload: ApprovalRequestDecision,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    return await approval_service.decide_approval_request(
+        db=db,
+        org_id=org_member.org_id,
+        task_id=id,
+        approval_id=approval_id,
+        decider_id=org_member.user_id,
+        decider_role=org_member.role,
+        status_choice=payload.status,
+        comment=payload.comment
+    )
+
+
+@router.post("/{id}/time-entries", response_model=TimeEntryResponse, status_code=status.HTTP_201_CREATED)
+async def log_time_route(
+    id: uuid.UUID,
+    payload: TimeEntryCreate,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    return await time_entry_service.log_time(
+        db=db,
+        org_id=org_member.org_id,
+        task_id=id,
+        user_id=org_member.user_id,
+        minutes=payload.minutes,
+        description=payload.description
+    )
+
+
+@router.get("/{id}/time-entries", response_model=list[TimeEntryResponse])
+async def list_time_entries_route(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    return await time_entry_service.list_time_entries(
+        db=db,
+        org_id=org_member.org_id,
+        task_id=id
+    )
+
+
+@router.post("/{id}/links", response_model=TaskLinkResponse, status_code=status.HTTP_201_CREATED)
+async def create_link_route(
+    id: uuid.UUID,
+    payload: TaskLinkCreate,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    return await task_link_service.create_link(
+        db=db,
+        org_id=org_member.org_id,
+        source_task_id=id,
+        target_task_id=payload.target_task_id,
+        link_type=payload.link_type,
+        actor_id=org_member.user_id
+    )
+
+
+@router.delete("/{id}/links/{link_id}", status_code=status.HTTP_200_OK)
+async def delete_link_route(
+    id: uuid.UUID,
+    link_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    await task_link_service.delete_link(
+        db=db,
+        org_id=org_member.org_id,
+        source_task_id=id,
+        link_id=link_id,
+        actor_id=org_member.user_id
+    )
+
+
+@router.get("/{id}/activity", response_model=list[ActivityLogResponse], status_code=status.HTTP_200_OK)
+async def list_task_activity_route(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    await task_service.get_task(db, org_member.org_id, id)
+    return await AuditService.list_task_activity_logs(db, org_member.org_id, id)

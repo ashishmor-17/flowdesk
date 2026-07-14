@@ -34,3 +34,16 @@ class AutomationRuleResponse(AutomationRuleBase):
     class Config:
         from_attributes = True
 
+class AutomationHistoryResponse(BaseModel):
+    id: uuid.UUID
+    rule_id: uuid.UUID
+    event_id: uuid.UUID | None
+    task_id: uuid.UUID | None
+    success: bool
+    error_message: str | None
+    action_type: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+

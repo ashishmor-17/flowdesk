@@ -1,4 +1,6 @@
+import os
 from typing import AsyncGenerator
+from sqlalchemy.pool import NullPool
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -8,12 +10,18 @@ from app.core.config import get_settings
 settings = get_settings()
 
 
+pool_kwargs = {}
+if os.getenv("TESTING") == "true":
+    pool_kwargs["poolclass"] = NullPool
+else:
+    pool_kwargs["pool_pre_ping"] = True
+    pool_kwargs["pool_size"] = 5
+
 engine = create_async_engine(
     settings.DATABASE_URL.get_secret_value(),
     echo=False,
-    pool_pre_ping=True,
-    pool_size=5,
-    connect_args={"ssl": False}
+    connect_args={"ssl": False},
+    **pool_kwargs
 )
 
 AsyncSessionLocal = async_sessionmaker(

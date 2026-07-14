@@ -66,6 +66,27 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
     labels = relationship("TaskLabel", back_populates="task", cascade="all, delete-orphan")
     comments = relationship("Comment", back_populates="task", cascade="all, delete-orphan")
     attachments = relationship("TaskAttachment", back_populates="task", cascade="all, delete-orphan")
+    sla_timer = relationship("SLATimer", back_populates="task", uselist=False, cascade="all, delete-orphan")
+    approval_requests = relationship("ApprovalRequest", back_populates="task", cascade="all, delete-orphan")
+    time_entries = relationship("TimeEntry", back_populates="task", cascade="all, delete-orphan")
+    outbound_links = relationship("TaskLink", foreign_keys="TaskLink.source_task_id", back_populates="source_task", cascade="all, delete-orphan")
+    inbound_links = relationship("TaskLink", foreign_keys="TaskLink.target_task_id", back_populates="target_task", cascade="all, delete-orphan")
+
+    @property
+    def sla_status(self) -> str | None:
+        return self.sla_timer.status if self.sla_timer else None
+
+    @property
+    def sla_deadline(self) -> datetime | None:
+        return self.sla_timer.deadline if self.sla_timer else None
+
+    @property
+    def total_minutes_logged(self) -> int:
+        return sum(entry.minutes for entry in self.time_entries)
+
+    @property
+    def links(self) -> list:
+        return list(self.outbound_links) + list(self.inbound_links)
 
     __table_args__ = (
         Index("ix_tasks_project_id", "project_id"),

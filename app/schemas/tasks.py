@@ -3,6 +3,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from app.core.enums import TaskStatus, TaskPriority
+from app.schemas.task_link import TaskLinkResponse
 
 class TaskBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
@@ -41,6 +42,10 @@ class TaskResponse(TaskBase):
     updated_at: datetime
     assignees: list[TaskAssigneeResponse] = []
     labels: list[TaskLabelResponse] = []
+    sla_status: str | None = None
+    sla_deadline: datetime | None = None
+    total_minutes_logged: int = 0
+    links: list[TaskLinkResponse] = []
 
     class Config:
         from_attributes = True

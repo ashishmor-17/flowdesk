@@ -2,13 +2,13 @@ import asyncio
 import uuid
 import logging
 import threading
-from datetime import date, datetime, time
+from datetime import date, time, timezone, timedelta, datetime
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from celery.utils.log import get_task_logger
 
-from app.core.database import engine
 from app.workers.celery_app import celery_app
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, transaction_scope
 from app.core.redis import redis_client
 from app.models.notifications import Notification
 from app.models.users import User
@@ -16,11 +16,39 @@ from app.models.tasks import Task
 from app.models.task_events import TaskEvent
 from app.models.automation_rules import AutomationRule
 from app.models.org_members import OrgMember
+from app.models.sla_timers import SLATimer
+from app.models.task_watchers import TaskWatcher
+from app.models.automation_history import AutomationHistory
 from app.core.enums import NotificationType, NotificationEntityType
 from app.services.notification_service import NotificationService
 from app.services.upload_session_service import cleanup_expired_sessions
+from app.services.sla_service import scan_and_evaluate_sla_timers
 
 logger = get_task_logger(__name__)
+
+_loop = None
+_loop_thread = None
+_loop_lock = threading.Lock()
+
+
+def start_background_loop():
+    global _loop, _loop_thread
+    with _loop_lock:
+        if _loop is None:
+            _loop = asyncio.new_event_loop()
+            def run_loop(loop):
+                asyncio.set_event_loop(loop)
+                loop.run_forever()
+            _loop_thread = threading.Thread(target=run_loop, args=(_loop,), daemon=True)
+            _loop_thread.start()
+
+
+def run_async_task(coro_func):
+
+    start_background_loop()
+    coro = coro_func()
+    future = asyncio.run_coroutine_threadsafe(coro, _loop)
+    return future.result()
 
 
 @celery_app.task(name="send_test_notification")
@@ -50,47 +78,45 @@ def send_notification(
     logger.info(f"Processing notification type={type} for recipient={recipient_id}")
     
     async def _async_save():
-        try:
-            o_id = uuid.UUID(org_id)
-            r_id = uuid.UUID(recipient_id)
-            a_id = uuid.UUID(actor_id) if actor_id else None
-            e_id = uuid.UUID(entity_id) if entity_id else None
+        o_id = uuid.UUID(org_id)
+        r_id = uuid.UUID(recipient_id)
+        a_id = uuid.UUID(actor_id) if actor_id else None
+        e_id = uuid.UUID(entity_id) if entity_id else None
 
-            async with AsyncSessionLocal() as db:
-                notification = Notification(
-                    org_id=o_id,
-                    recipient_id=r_id,
-                    actor_id=a_id,
-                    type=type,
-                    entity_type=entity_type,
-                    entity_id=e_id,
-                    payload=payload,
-                    is_read=False
-                )
-                db.add(notification)
-                await db.commit()
+        async with AsyncSessionLocal() as db:
+            notification = Notification(
+                org_id=o_id,
+                recipient_id=r_id,
+                actor_id=a_id,
+                type=type,
+                entity_type=entity_type,
+                entity_id=e_id,
+                payload=payload,
+                is_read=False
+            )
+            db.add(notification)
+            await db.commit()
 
-                receipent = await db.get(User, r_id)
-                if receipent and receipent.is_active:
-                    redis_key = f"user:{recipient_id}:unread_count"
+            receipent = await db.get(User, r_id)
+            if receipent and receipent.is_active:
+                redis_key = f"user:{recipient_id}:unread_count"
+                try:
                     await redis_client.incr(redis_key)
                     logger.info(f"Notification saved to DB and Redis counter incremented for user {recipient_id}")
-                else:
-                    logger.info(f"Notification saved to DB but Redis count skipped for deactivated/missing user {recipient_id}")
-        finally:
-            await engine.dispose()
-            await redis_client.close()
+                except Exception as e:
+                    logger.warning(f"Notification saved to DB, but failed to increment Redis count: {e}")
+            else:
+                logger.info(f"Notification saved to DB but Redis count skipped for deactivated/missing user {recipient_id}")
                 
-    asyncio.run(_async_save())
+    run_async_task(_async_save)
     return f"Notification {type} sent to {recipient_id}"
+
 
 @celery_app.task(name="process_automation_events")
 def process_automation_events() -> str:
-
     logger.info("Starting processing of automation events")
     
     async def _async_process():
-        
         try:
             async with AsyncSessionLocal() as db:
                 events_result = await db.scalars(
@@ -100,21 +126,21 @@ def process_automation_events() -> str:
                 )
                 events = list(events_result.all())
                 
-                if not events:
-                    logger.info("No unprocessed task events to process.")
-                    return
+                logger.info(f"Found {len(events)} unprocessed events.")
                 
-                logger.info(f"Found {len(events)} unprocessed events to process.")
+                if not events:
+                    return
                 
                 for event in events:
                     try:
+                        logger.info(f"Processing event {event.id} for task {event.task_id}...")
                         event.processed = True
-                        await db.flush()
+                        await db.commit()
+                        logger.info(f"Marked event {event.id} as processed and committed.")
                         
                         task = await db.get(Task, event.task_id)
                         if not task:
-                            logger.warning(f"Task {event.task_id} not found for event {event.id}. Skipping.")
-                            await db.commit()
+                            logger.error(f"Task {event.task_id} not found.")
                             continue
                         
                         rules_result = await db.scalars(
@@ -127,9 +153,11 @@ def process_automation_events() -> str:
                             .order_by(AutomationRule.created_at.asc())
                         )
                         rules = list(rules_result.all())
+                        logger.info(f"Found {len(rules)} rules for event {event.id}.")
                         
                         for rule in rules:
                             if rule.project_id is not None and rule.project_id != task.project_id:
+                                logger.info(f"Rule {rule.name} project mismatch.")
                                 continue
                             
                             matched = True
@@ -148,155 +176,171 @@ def process_automation_events() -> str:
                                     break
                             
                             if not matched:
+                                logger.info(f"Rule {rule.name} conditions not matched.")
                                 continue
                             
-                            logger.info(f"Rule '{rule.name}' matches event {event.id} on task {task.id}.")
+                            logger.info(f"Rule '{rule.name}' matched.")
                             
+                            rule_id = rule.id
+                            event_id = event.id
+                            task_id = task.id
                             action_type = rule.action_type
                             payload = rule.action_payload or {}
                             
-                            if action_type == "NOTIFY_USER":
-                                recipient_id = payload.get("user_id")
-                                message = payload.get("message", f"Automation alert: {rule.name}")
-                                if recipient_id:
-                                    NotificationService.create_notification(
-                                        org_id=task.org_id,
-                                        recipient_id=uuid.UUID(recipient_id),
-                                        type=NotificationType.AUTOMATION,
-                                        actor_id=None,
-                                        entity_type=NotificationEntityType.TASK,
-                                        entity_id=task.id,
-                                        payload={"message": message, "rule_name": rule.name}
-                                    )
-                                    
-                            elif action_type == "NOTIFY_ROLE":
-                                role = payload.get("role")
-                                message = payload.get("message", f"Automation alert: {rule.name}")
-                                if role:
-                                    members_result = await db.scalars(
-                                        select(OrgMember.user_id)
-                                        .where(
-                                            OrgMember.org_id == task.org_id,
-                                            OrgMember.role == role
-                                        )
-                                    )
-                                    member_ids = list(members_result.all())
-                                    for mid in member_ids:
+                            success = True
+                            error_message = None
+                            
+                            try:
+                                logger.info(f"Executing action {action_type}...")
+                                if action_type == "NOTIFY_USER":
+                                    recipient_id = payload.get("user_id")
+                                    message = payload.get("message", f"Automation alert: {rule.name}")
+                                    if recipient_id:
                                         NotificationService.create_notification(
                                             org_id=task.org_id,
-                                            recipient_id=mid,
+                                            recipient_id=uuid.UUID(recipient_id),
                                             type=NotificationType.AUTOMATION,
                                             actor_id=None,
                                             entity_type=NotificationEntityType.TASK,
-                                            entity_id=task.id,
+                                            entity_id=task_id,
                                             payload={"message": message, "rule_name": rule.name}
                                         )
+                                    else:
+                                        raise ValueError("Recipient user_id is missing in action payload.")
                                         
-                            elif action_type == "CHANGE_STATUS":
-                                new_status = payload.get("status")
-                                if new_status:
-                                    task.status = new_status
-                                    task.version += 1
-                                    await db.flush()
-                                    logger.info(f"Rule '{rule.name}' changed task {task.id} status to {new_status}.")
-                                    
-                            elif action_type == "SEND_EMAIL":
-                                email = payload.get("email")
-                                subject = payload.get("subject", "Automation Update")
-                                body = payload.get("body", "")
-                                logger.info(f"Simulating email sent to {email}. Subject: {subject}. Body: {body}")
-                        
-                        await db.commit()
+                                elif action_type == "NOTIFY_ROLE":
+                                    role = payload.get("role")
+                                    message = payload.get("message", f"Automation alert: {rule.name}")
+                                    if role:
+                                        members_result = await db.scalars(
+                                            select(OrgMember.user_id)
+                                            .where(
+                                                OrgMember.org_id == task.org_id,
+                                                OrgMember.role == role
+                                            )
+                                        )
+                                        member_ids = list(members_result.all())
+                                        for mid in member_ids:
+                                            NotificationService.create_notification(
+                                                org_id=task.org_id,
+                                                recipient_id=mid,
+                                                type=NotificationType.AUTOMATION,
+                                                actor_id=None,
+                                                entity_type=NotificationEntityType.TASK,
+                                                entity_id=task_id,
+                                                payload={"message": message, "rule_name": rule.name}
+                                            )
+                                    else:
+                                        raise ValueError("Recipient role is missing in action payload.")
+                                            
+                                elif action_type == "CHANGE_STATUS":
+                                    new_status = payload.get("status")
+                                    if new_status:
+                                        task.status = new_status
+                                        task.version += 1
+                                        await db.flush()
+                                        logger.info(f"Changed status of task {task_id} to {new_status}.")
+                                    else:
+                                        raise ValueError("Status is missing in action payload.")
+                                        
+                                elif action_type == "SEND_EMAIL":
+                                    email = payload.get("email")
+                                    subject = payload.get("subject", "Automation Update")
+                                    body = payload.get("body", "")
+                                    if not email:
+                                        raise ValueError("Recipient email is missing in action payload.")
+                                    logger.info(f"Simulating email sent to {email}.")
+                                else:
+                                    raise ValueError(f"Unknown action type: {action_type}")
+                                
+                                await db.commit()
+                                logger.info("Action completed and transaction committed.")
+                            except Exception as e:
+                                await db.rollback()
+                                success = False
+                                error_message = str(e)
+                                logger.error(f"Action failed with error: {e}", exc_info=True)
+                            
+                            try:
+                                logger.info("Writing history record...")
+                                history = AutomationHistory(
+                                    rule_id=rule_id,
+                                    event_id=event_id,
+                                    task_id=task_id,
+                                    success=success,
+                                    error_message=error_message,
+                                    action_type=action_type
+                                )
+                                db.add(history)
+                                await db.commit()
+                                logger.info("History record committed successfully.")
+                            except Exception as e:
+                                logger.error(f"Failed to commit history: {e}", exc_info=True)
+                                await db.rollback()
                     except Exception as e:
-                        logger.error(f"Failed to process event {event.id}: {e}")
+                        logger.error(f"Failed to process event {event.id}: {e}", exc_info=True)
                         await db.rollback()
-                        
-        finally:
-            await engine.dispose()
-            await redis_client.close()
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
+        except Exception as e:
+            logger.error(f"Top level error in automation worker: {e}", exc_info=True)
 
-    if loop and loop.is_running():
-        t = threading.Thread(target=lambda: asyncio.run(_async_process()))
-        t.start()
-        t.join()
-    else:
-        asyncio.run(_async_process())
+    run_async_task(_async_process)
     return "Event processing complete"
+
 
 @celery_app.task(name="check_overdue_tasks")
 def check_overdue_tasks() -> str:
-
     logger.info("Scanning for overdue tasks")
     
     async def _async_check():
-        
-        try:
-            async with AsyncSessionLocal() as db:
-                today = date.today()
-                
-                overdue_result = await db.scalars(
-                    select(Task)
+        async with AsyncSessionLocal() as db:
+            today = date.today()
+            
+            overdue_result = await db.scalars(
+                select(Task)
+                .where(
+                    Task.due_date < today,
+                    Task.status != "done",
+                    Task.deleted_at.is_(None)
+                )
+            )
+            overdue_tasks = list(overdue_result.all())
+            
+            logger.info(f"Found {len(overdue_tasks)} potential overdue tasks.")
+            
+            today_start = datetime.combine(today, time.min)
+            event_created = False
+            
+            for task in overdue_tasks:
+                exists = await db.scalar(
+                    select(TaskEvent.id)
                     .where(
-                        Task.due_date < today,
-                        Task.status != "done",
-                        Task.deleted_at.is_(None)
+                        TaskEvent.task_id == task.id,
+                        TaskEvent.event_type == "TASK_OVERDUE",
+                        TaskEvent.created_at >= today_start
                     )
                 )
-                overdue_tasks = list(overdue_result.all())
                 
-                logger.info(f"Found {len(overdue_tasks)} potential overdue tasks.")
-                
-                today_start = datetime.combine(today, time.min)
-                event_created = False
-                
-                for task in overdue_tasks:
-                    exists = await db.scalar(
-                        select(TaskEvent.id)
-                        .where(
-                            TaskEvent.task_id == task.id,
-                            TaskEvent.event_type == "TASK_OVERDUE",
-                            TaskEvent.created_at >= today_start
-                        )
+                if not exists:
+                    event = TaskEvent(
+                        task_id=task.id,
+                        org_id=task.org_id,
+                        event_type="TASK_OVERDUE",
+                        actor_id=None,
+                        payload={
+                            "task_title": task.title,
+                            "due_date": str(task.due_date)
+                        },
+                        processed=False
                     )
-                    
-                    if not exists:
-                        event = TaskEvent(
-                            task_id=task.id,
-                            org_id=task.org_id,
-                            event_type="TASK_OVERDUE",
-                            actor_id=None,
-                            payload={
-                                "task_title": task.title,
-                                "due_date": str(task.due_date)
-                            },
-                            processed=False
-                        )
-                        db.add(event)
-                        event_created = True
-                        logger.info(f"Fired TASK_OVERDUE event for task {task.id}.")
+                    db.add(event)
+                    event_created = True
+                    logger.info(f"Fired TASK_OVERDUE event for task {task.id}.")
+            
+            if event_created:
+                await db.commit()
+                process_automation_events.delay()
                 
-                if event_created:
-                    await db.commit()
-                    process_automation_events.delay()
-                    
-        finally:
-            await engine.dispose()
-            await redis_client.close()
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        t = threading.Thread(target=lambda: asyncio.run(_async_check()))
-        t.start()
-        t.join()
-    else:
-        asyncio.run(_async_check())
+    run_async_task(_async_check)
     return "Overdue tasks check complete"
 
 
@@ -305,23 +349,24 @@ def cleanup_expired_upload_sessions() -> str:
     logger.info("Scanning for expired upload sessions to clean up")
     
     async def _async_cleanup():
-        try:
-            async with AsyncSessionLocal() as db:
-                count = await cleanup_expired_sessions(db)
-                logger.info(f"Cleaned up {count} expired upload sessions.")
-        finally:
-            await engine.dispose()
-            await redis_client.close()
+        async with AsyncSessionLocal() as db:
+            count = await cleanup_expired_sessions(db)
+            logger.info(f"Cleaned up {count} expired upload sessions.")
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        t = threading.Thread(target=lambda: asyncio.run(_async_cleanup()))
-        t.start()
-        t.join()
-    else:
-        asyncio.run(_async_cleanup())
+    run_async_task(_async_cleanup)
     return "Cleanup of expired upload sessions complete"
+
+
+@celery_app.task(name="check_sla_timers")
+def check_sla_timers() -> str:
+    logger.info("Scanning active SLA timers for warning/breach escalation")
+
+    async def _async_check():
+        async with AsyncSessionLocal() as db:
+            count = await scan_and_evaluate_sla_timers(db)
+            if count > 0:
+                await db.commit()
+            logger.info(f"SLA timers check processed and committed {count} changes.")
+
+    run_async_task(_async_check)
+    return "SLA timers check complete"

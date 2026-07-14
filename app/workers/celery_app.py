@@ -26,5 +26,9 @@ celery_app.conf.beat_schedule = {
     "cleanup-expired-upload-sessions-hourly": {
         "task": "cleanup_expired_upload_sessions",
         "schedule": 3600.0,
+    },
+    "check-sla-timers-every-minute": {
+        "task": "check_sla_timers",
+        "schedule": 60.0,
     }
 }
