@@ -9,6 +9,7 @@ from app.api.deps import get_org_member
 from app.models.org_members import OrgMember
 from app.models.projects import Project
 from app.schemas.projects import *
+from app.schemas.workflow import *
 from app.services import project_service
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -145,3 +146,62 @@ async def delete_project_route(
         cascade=cascade
     )
     return {"message": "Project deleted"}
+
+@router.post("/{id}/statuses", response_model=ProjectStatusResponse, status_code=status.HTTP_201_CREATED)
+async def create_custom_status_route(
+    id: uuid.UUID,
+    payload: ProjectStatusCreate,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    
+    if org_member.role not in [UserRole.ADMIN, UserRole.OWNER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ErrorCode.FORBIDDEN,
+                "message": "Only organization Admin and Owner can create custom statuses."
+            }
+        )
+    return await project_service.create_custom_status(
+        db=db,
+        org_id=org_member.org_id,
+        project_id=id,
+        payload=payload
+    )
+
+@router.get("/{id}/statuses", response_model=list[ProjectStatusResponse])
+async def get_project_statuses_route(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    
+    return await project_service.get_project_statuses(
+        db=db,
+        org_id=org_member.org_id,
+        project_id=id
+    )
+
+@router.post("/{id}/workflow-rules", response_model=WorkflowRuleResponse, status_code=status.HTTP_201_CREATED)
+async def create_workflow_rule_route(
+    id: uuid.UUID,
+    payload: WorkflowRuleCreate,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    
+    if org_member.role not in [UserRole.ADMIN, UserRole.OWNER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ErrorCode.FORBIDDEN,
+                "message": "Only organization Admin and Owner can create workflow rules."
+            }
+        )
+    return await project_service.create_workflow_rule(
+        db=db,
+        org_id=org_member.org_id,
+        project_id=id,
+        payload=payload
+    )

@@ -3,9 +3,11 @@ import re
 from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from app.models.comments import Comment, CommentMention
 from app.models.users import User
+from app.models.org_members import OrgMember
 from app.models.org_members import OrgMember
 from app.schemas.comments import *
 from app.services.task_service import get_task
@@ -14,6 +16,7 @@ from app.core.enums import UserRole, NotificationType, NotificationEntityType
 from app.services.notification_service import NotificationService
 from app.repositories.comment_repository import CommentRepository
 from app.repositories.user_repository import UserRepository
+from app.repositories.task_watcher_repository import TaskWatcherRepository
 
 async def extract_mentions(content: str) -> list[str]:
     return re.findall(r'@([a-zA-Z0-9_.-]+)', content)
@@ -38,8 +41,6 @@ async def create_comment(
         usernames = await extract_mentions(payload.content)
         mentioned_ids = []
         if usernames:
-            from sqlalchemy import select, func
-            from app.models.org_members import OrgMember
             query = (
                 select(User.id)
                 .join(OrgMember, OrgMember.user_id == User.id)
@@ -61,7 +62,7 @@ async def create_comment(
                 )
         
         author_user = await UserRepository.get_by_id(db, author_id)
-        author_name = f"{author_user.first_name} {author_user.last_name}" if author_user.last_name else author_user.first_name
+        author_name = author_user.full_name or author_user.email
         preview = payload.content[:100] + ("..." if len(payload.content)>100 else "")
 
         for user_id in mentioned_ids:
@@ -82,7 +83,10 @@ async def create_comment(
                     }
                 )
         
-        recipients_candidates = {task.created_by} | {a.user_id for a in task.assignees}
+        watchers = await TaskWatcherRepository.list_by_task(db, task.id)
+        watcher_ids = {w.user_id for w in watchers}
+        recipients_candidates = {task.created_by} | {a.user_id for a in task.assignees if a.user_id is not None} | watcher_ids
+
         for recipient_id in recipients_candidates:
             if recipient_id != author_id and recipient_id not in mentioned_ids:
                 NotificationService.create_notification(
@@ -175,8 +179,6 @@ async def update_comment(
         usernames = await extract_mentions(payload.content)
         mentioned_ids = []
         if usernames:
-            from sqlalchemy import select, func
-            from app.models.org_members import OrgMember
             query = (
                 select(User.id)
                 .join(OrgMember, OrgMember.user_id == User.id)
@@ -188,7 +190,6 @@ async def update_comment(
             res = await db.execute(query)
             mentioned_ids = [row[0] for row in res.all()]
 
-        from sqlalchemy import select
         existing_query = select(CommentMention).where(CommentMention.comment_id == comment_id)
         existing_res = await db.execute(existing_query)
         existing_mentions = list(existing_res.scalars().all())
@@ -218,7 +219,7 @@ async def update_comment(
         if newly_mentioned_ids:
             task = await get_task(db, org_id, comment.task_id)
             author_user = await UserRepository.get_by_id(db, author_id)
-            author_name = f"{author_user.first_name} {author_user.last_name}" if author_user.last_name else author_user.first_name
+            author_name = author_user.full_name or author_user.email
             preview = payload.content[:100] + ("..." if len(payload.content) > 100 else "")
             for user_id in newly_mentioned_ids:
                 NotificationService.create_notification(

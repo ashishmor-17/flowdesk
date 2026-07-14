@@ -21,7 +21,7 @@ class Comment(Base, TimestampMixin, SoftDeleteMixin):
     )
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("organizations.id"),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False
     )
     author_id: Mapped[uuid.UUID] = mapped_column(

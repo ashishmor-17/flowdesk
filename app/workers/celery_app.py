@@ -22,5 +22,9 @@ celery_app.conf.beat_schedule = {
     "check-overdue-tasks-every-5-min": {
         "task": "check_overdue_tasks",
         "schedule": 300.0,
+    },
+    "cleanup-expired-upload-sessions-hourly": {
+        "task": "cleanup_expired_upload_sessions",
+        "schedule": 3600.0,
     }
 }

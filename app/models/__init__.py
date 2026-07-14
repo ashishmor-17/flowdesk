@@ -1,5 +1,6 @@
 from app.models.base import Base
 from app.models.users import User
+from app.models.user_profiles import UserProfile
 from app.models.organizations import Organization
 from app.models.org_members import OrgMember
 from app.models.invitations import Invitation
@@ -12,11 +13,19 @@ from app.models.comments import Comment, CommentMention
 from app.models.notifications import Notification
 from app.models.automation_rules import AutomationRule
 from app.models.task_events import TaskEvent
-
+from app.models.api_tokens import APIToken
+from app.models.teams import Team
+from app.models.team_members import TeamMember
+from app.models.project_statuses import ProjectStatusModel
+from app.models.workflow_rules import WorkflowRule
+from app.models.task_watchers import TaskWatcher
+from app.models.task_attachments import TaskAttachment
+from app.models.upload_sessions import UploadSession
 
 __all__ = [
     "Base",
     "User",
+    "UserProfile",
     "Organization",
     "OrgMember",
     "Invitation",
@@ -29,5 +38,13 @@ __all__ = [
     "CommentMention",
     "Notification",
     "AutomationRule",
-    "TaskEvent"
+    "APIToken",
+    "TaskEvent",
+    "Team",
+    "TeamMember",
+    "ProjectStatusModel",
+    "WorkflowRule",
+    "TaskWatcher",
+    "TaskAttachment",
+    "UploadSession"
 ]

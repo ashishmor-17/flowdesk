@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime, UTC
+from hashlib import sha256
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status, Request, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -9,7 +11,9 @@ from app.core.database import get_db
 from app.core.redis import redis_client
 from app.models.users import User
 from app.models.org_members import OrgMember
+from app.models.api_tokens import APIToken
 from app.repositories.user_repository import UserRepository
+from app.repositories.token_repository import TokenRepository
 
 reusable_oauth2 = HTTPBearer()
 
@@ -18,18 +22,62 @@ settings = get_settings()
 
 
 async def get_current_user(
-    token: HTTPAuthorizationCredentials = Depends(reusable_oauth2),
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> User:
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    api_key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+    if api_key:
+        key_hash = sha256(api_key.encode()).hexdigest()
+        
+        token_record = await TokenRepository.get_by_hash(db, key_hash)
+        
+        if not token_record:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "UNAUTHORIZED",
+                    "message": "Invalid API key."
+                }
+            )
+            
+        if token_record.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "UNAUTHORIZED",
+                    "message": "API key has expired."
+                }
+            )
+            
+        user = await UserRepository.get_by_id(db, token_record.user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "UNAUTHORIZED",
+                    "message": "User associated with API key is inactive or not found."
+                }
+            )
+
+            
+        return user
+
+    auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise credentials_exception
+        
+    token_str = auth_header.split(" ")[1]
     
     try:
         payload = jwt.decode(
-            token.credentials,
+            token_str,
             settings.JWT_SECRET.get_secret_value(),
             algorithms=[settings.JWT_ALGORITHM]
         )

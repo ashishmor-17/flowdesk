@@ -9,8 +9,11 @@ from app.core.errors import ErrorCode
 from app.core.redis import redis_client
 from app.models.users import User
 from app.models.org_members import OrgMember
+from app.models.teams import Team
+from app.models.team_members import TeamMember
+from app.schemas.teams import TeamCreate, TeamResponse, TeamMemberAdd, TeamMemberResponse
 from app.schemas.organization import *
-from app.services import org_service
+from app.services import org_service, team_service
 from app.api.deps import (
     get_current_user,
     get_current_org_id,
@@ -99,9 +102,7 @@ async def list_members(
     members = await org_service.get_org_members(db, org_id)
 
     def get_full_name(user: User) -> str:
-        if user.last_name:
-            return f"{user.first_name} {user.last_name}"
-        return user.first_name
+        return user.full_name or user.email
     
     response = OrgMembersListResponse(
         members= [
@@ -148,3 +149,39 @@ async def delete_org(
         caller_id=current_user.id
     )
     return {"message": "Organization deleted successfully."}
+
+@router.post("/teams", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
+async def create_team(
+    payload: TeamCreate,
+    org_member: OrgMember = Depends(get_org_member),
+    db: AsyncSession = Depends(get_db)
+):
+    team = await team_service.create_team(db, payload, org_member)
+    return TeamResponse.model_validate(team)
+
+@router.post("/teams/{id}/members", response_model=TeamMemberResponse, status_code=status.HTTP_201_CREATED)
+async def add_team_member(
+    id: uuid.UUID,
+    payload: TeamMemberAdd,
+    org_member: OrgMember = Depends(get_org_member),
+    db: AsyncSession = Depends(get_db)
+):
+    member = await team_service.add_team_member(db, id, payload, org_member)
+    return TeamMemberResponse.model_validate(member)
+
+@router.delete("/teams/{id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_team_member(
+    id: uuid.UUID,
+    user_id: uuid.UUID,
+    org_member: OrgMember = Depends(get_org_member),
+    db: AsyncSession = Depends(get_db)
+):
+    await team_service.remove_team_member(db, id, user_id, org_member)
+
+@router.delete("/teams/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_team(
+    id: uuid.UUID,
+    org_member: OrgMember = Depends(get_org_member),
+    db: AsyncSession = Depends(get_db)
+):
+    await team_service.delete_team(db, id, org_member)

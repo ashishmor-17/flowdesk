@@ -1,10 +1,12 @@
 import asyncio
 import uuid
 import logging
+import threading
 from datetime import date, datetime, time
 from sqlalchemy import select
 from celery.utils.log import get_task_logger
 
+from app.core.database import engine
 from app.workers.celery_app import celery_app
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_client
@@ -14,6 +16,9 @@ from app.models.tasks import Task
 from app.models.task_events import TaskEvent
 from app.models.automation_rules import AutomationRule
 from app.models.org_members import OrgMember
+from app.core.enums import NotificationType, NotificationEntityType
+from app.services.notification_service import NotificationService
+from app.services.upload_session_service import cleanup_expired_sessions
 
 logger = get_task_logger(__name__)
 
@@ -73,7 +78,6 @@ def send_notification(
                 else:
                     logger.info(f"Notification saved to DB but Redis count skipped for deactivated/missing user {recipient_id}")
         finally:
-            from app.core.database import engine
             await engine.dispose()
             await redis_client.close()
                 
@@ -83,10 +87,9 @@ def send_notification(
 @celery_app.task(name="process_automation_events")
 def process_automation_events() -> str:
 
-    logger.info("Starting processing of automation events...")
+    logger.info("Starting processing of automation events")
     
     async def _async_process():
-        from app.core.enums import NotificationType, NotificationEntityType
         
         try:
             async with AsyncSessionLocal() as db:
@@ -156,7 +159,6 @@ def process_automation_events() -> str:
                                 recipient_id = payload.get("user_id")
                                 message = payload.get("message", f"Automation alert: {rule.name}")
                                 if recipient_id:
-                                    from app.services.notification_service import NotificationService
                                     NotificationService.create_notification(
                                         org_id=task.org_id,
                                         recipient_id=uuid.UUID(recipient_id),
@@ -179,7 +181,6 @@ def process_automation_events() -> str:
                                         )
                                     )
                                     member_ids = list(members_result.all())
-                                    from app.services.notification_service import NotificationService
                                     for mid in member_ids:
                                         NotificationService.create_notification(
                                             org_id=task.org_id,
@@ -211,7 +212,6 @@ def process_automation_events() -> str:
                         await db.rollback()
                         
         finally:
-            from app.core.database import engine
             await engine.dispose()
             await redis_client.close()
     try:
@@ -220,7 +220,6 @@ def process_automation_events() -> str:
         loop = None
 
     if loop and loop.is_running():
-        import threading
         t = threading.Thread(target=lambda: asyncio.run(_async_process()))
         t.start()
         t.join()
@@ -285,7 +284,6 @@ def check_overdue_tasks() -> str:
                     process_automation_events.delay()
                     
         finally:
-            from app.core.database import engine
             await engine.dispose()
             await redis_client.close()
     try:
@@ -294,10 +292,36 @@ def check_overdue_tasks() -> str:
         loop = None
 
     if loop and loop.is_running():
-        import threading
         t = threading.Thread(target=lambda: asyncio.run(_async_check()))
         t.start()
         t.join()
     else:
         asyncio.run(_async_check())
     return "Overdue tasks check complete"
+
+
+@celery_app.task(name="cleanup_expired_upload_sessions")
+def cleanup_expired_upload_sessions() -> str:
+    logger.info("Scanning for expired upload sessions to clean up")
+    
+    async def _async_cleanup():
+        try:
+            async with AsyncSessionLocal() as db:
+                count = await cleanup_expired_sessions(db)
+                logger.info(f"Cleaned up {count} expired upload sessions.")
+        finally:
+            await engine.dispose()
+            await redis_client.close()
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        t = threading.Thread(target=lambda: asyncio.run(_async_cleanup()))
+        t.start()
+        t.join()
+    else:
+        asyncio.run(_async_cleanup())
+    return "Cleanup of expired upload sessions complete"

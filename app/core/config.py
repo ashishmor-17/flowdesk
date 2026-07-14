@@ -16,6 +16,18 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = True
     REDIS_PREFIX: str = "flowdesk"
 
+    # Storage Settings
+    STORAGE_BACKEND: str = "local" # local or s3
+    STORAGE_LOCAL_DIR: str = "uploads"
+    AWS_ACCESS_KEY_ID: str | None = None
+    AWS_SECRET_ACCESS_KEY: str | None = None
+    AWS_REGION: str = "us-east-1"
+    FILES_BUCKET: str = "test-bucket"
+    AWS_ENDPOINT_URL: str | None = None
+    MAX_FILE_SIZE_BYTES: int = 10 * 1024 * 1024 # 10MB default
+    MIN_PART_SIZE_BYTES: int = 5 * 1024 * 1024 # 5MB default
+    ALLOWED_EXTENSIONS: str = "pdf,png,jpg,jpeg,doc,docx,xls,xlsx,csv,txt,zip"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
