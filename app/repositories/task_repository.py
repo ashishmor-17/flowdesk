@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.models.tasks import Task
 from app.models.task_assignees import TaskAssignee
 from app.models.org_members import OrgMember
+from app.models.teams import Team
 from app.core.enums import TaskStatus, TaskPriority
 
 class TaskRepository:
@@ -130,3 +131,14 @@ class TaskRepository:
         )
         result = await db.execute(query)
         return set(result.scalars().all())
+    
+    @staticmethod
+    async def check_teams_exist(db: AsyncSession, org_id: uuid.UUID, team_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+
+        query = select(Team.id).where(
+            Team.org_id == org_id,
+            Team.id.in_(team_ids)
+        )
+        result = await db.execute(query)
+        return set(result.scalars().all())
+

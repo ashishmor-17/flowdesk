@@ -24,7 +24,7 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
     )
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("organizations.id"),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False
     )
     title: Mapped[str] = mapped_column(
@@ -65,6 +65,7 @@ class Task(Base, TimestampMixin, SoftDeleteMixin):
     assignees = relationship("TaskAssignee", back_populates="task", cascade="all, delete-orphan")
     labels = relationship("TaskLabel", back_populates="task", cascade="all, delete-orphan")
     comments = relationship("Comment", back_populates="task", cascade="all, delete-orphan")
+    attachments = relationship("TaskAttachment", back_populates="task", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_tasks_project_id", "project_id"),

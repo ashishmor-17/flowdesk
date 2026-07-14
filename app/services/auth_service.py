@@ -1,17 +1,21 @@
 import secrets
 from hashlib import sha256
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.refresh_tokens import RefreshToken
+from app.models.users import User
+from app.models.org_members import OrgMember
 from app.schemas.user import UserCreate
-from app.core.database import get_db
+from app.schemas.auth import *
+from app.core.database import get_db, transaction_scope
 from app.core.security import hash_password, create_access_token, verify_password, decode_access_token
 from app.repositories.user_repository import UserRepository
 from app.repositories.refresh_token_repository import RefreshTokenRepository
+from app.repositories.token_repository import TokenRepository
 
 security = HTTPBearer()
 
@@ -188,3 +192,73 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         )
     
     return user
+
+async def generate_api_token(
+    db: AsyncSession,
+    payload: APITokenCreate,
+    current_user: User,
+    org_member: OrgMember
+) -> APITokenCreatedResponse:
+    
+    if org_member.role.lower() not in ["owner", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FORBIDDEN",
+                "message": "Only Admin or Owner can create API tokens."
+            }
+        )
+
+    raw_token = f"fd_{secrets.token_urlsafe(32)}"
+    token_hash = sha256(raw_token.encode()).hexdigest()
+    expires_at = datetime.now(UTC) + timedelta(days=payload.expiry_days)
+
+    async with transaction_scope(db):
+        token_record = await TokenRepository.create_token(
+            db=db,
+            user_id=current_user.id,
+            token_hash=token_hash,
+            name=payload.name,
+            expires_at=expires_at
+        )
+
+        response_data = APITokenCreatedResponse(
+            id=token_record.id,
+            name=token_record.name,
+            raw_token=raw_token,
+            expires_at=token_record.expires_at,
+            created_at=token_record.created_at
+        )
+    return response_data
+
+async def get_active_tokens(db: AsyncSession, user_id: uuid.UUID) -> list[APITokenResponse]:
+    
+    tokens = await TokenRepository.get_active_tokens_by_user_id(db, user_id)
+    response = []
+    for t in tokens:
+        masked_hash = f"{t.token_hash[:6]}...{t.token_hash[-6:]}"
+        response.append(
+            APITokenResponse(
+                id=t.id,
+                name=t.name,
+                token_hash_masked=masked_hash,
+                expires_at=t.expires_at,
+                created_at=t.created_at
+            )
+        )
+    return response
+
+async def revoke_api_token(db: AsyncSession, token_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    
+    async with transaction_scope(db):
+        token_record = await TokenRepository.get_token_by_id_and_user_id(db, token_id, user_id)
+        if not token_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "NOT_FOUND",
+                    "message": "Token not found or not owned by you."
+                }
+            )
+        await TokenRepository.delete_token(db, token_record)
+

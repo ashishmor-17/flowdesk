@@ -1,32 +1,33 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.users import User
-from app.models.org_members import OrgMember
-from app.schemas.user import MeResponse
-from app.services.notification_service import NotificationService
+from app.schemas.user import MeResponse, UserUpdatePayload, PasswordUpdate, UserResponse
+from app.services import user_service
 
 router = APIRouter(tags=["users"])
 
+@router.get("/users/me", response_model=MeResponse)
 @router.get("/me", response_model=MeResponse)
 async def get_me(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    unread_count = await NotificationService.get_unread_count(db, current_user.id)
-    current_user.unread_notifications_count = unread_count
+    return await user_service.get_me_details(db, current_user)
 
-    # Fetch user's organization membership with eager organization loading
-    org_member = await db.scalar(
-        select(OrgMember)
-        .where(OrgMember.user_id == current_user.id)
-        .options(selectinload(OrgMember.org))
-    )
-    current_user.org_id = org_member.org_id if org_member else None
-    current_user.org_name = org_member.org.name if org_member and org_member.org else None
+@router.patch("/users/me", response_model=UserResponse)
+async def update_profile(
+    payload: UserUpdatePayload,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    return await user_service.update_user_preferences(db, current_user, payload)
 
-    return current_user
+@router.post("/users/me/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: PasswordUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    await user_service.change_user_password(db, current_user, payload)

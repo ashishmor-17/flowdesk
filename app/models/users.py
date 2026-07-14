@@ -23,11 +23,7 @@ class User(Base, TimestampMixin):
         String,
         nullable=False
     )
-    first_name: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-    )
-    last_name: Mapped[str] = mapped_column(
+    full_name: Mapped[str] = mapped_column(
         String,
         nullable=True
     )
@@ -46,6 +42,7 @@ class User(Base, TimestampMixin):
     comment_mentions = relationship("CommentMention", back_populates="mentioned_user")
     notifications = relationship("Notification", foreign_keys="[Notification.recipient_id]", back_populates="recipient",cascade="all, delete-orphan")
     sent_notifications = relationship("Notification", foreign_keys="[Notification.actor_id]", back_populates="actor")
+    profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_users_email", "email", unique=True),

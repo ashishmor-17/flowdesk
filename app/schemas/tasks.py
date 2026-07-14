@@ -14,7 +14,9 @@ class TaskCreate(TaskBase):
     project_id: uuid.UUID
 
 class TaskAssigneeResponse(BaseModel):
-    user_id: uuid.UUID
+    user_id: uuid.UUID | None = None
+    team_id: uuid.UUID | None = None
+    assignee_type: str = "USER"
     assigned_at: datetime
 
     class Config:
@@ -32,7 +34,7 @@ class TaskResponse(TaskBase):
     id: uuid.UUID
     project_id: uuid.UUID
     org_id: uuid.UUID
-    status: TaskStatus
+    status: str
     created_by: uuid.UUID
     version: int
     created_at: datetime
@@ -42,7 +44,6 @@ class TaskResponse(TaskBase):
 
     class Config:
         from_attributes = True
-
 
 class TaskListResponse(BaseModel):
     tasks: list[TaskResponse]
@@ -56,9 +57,13 @@ class TaskUpdate(BaseModel):
     version: int = Field(..., description= "Current version of the task for optimistic locking verification.")
 
 class TaskStatusUpdate(BaseModel):
-    status: TaskStatus
+    status: str
     version: int = Field(..., description= "Current version of the task for optimistic locking verification.")
 
 class TaskAssignUpdate(BaseModel):
-    user_ids: list[uuid.UUID]
+    user_ids: list[uuid.UUID] | None = None
+    team_ids: list[uuid.UUID] | None = None
 
+class TaskAssigneeCreate(BaseModel):
+    assignee_id: uuid.UUID
+    assignee_type: str = "USER"

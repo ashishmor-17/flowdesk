@@ -106,7 +106,7 @@ async def create_invitation(
         invited_user = await UserRepository.get_by_email(db, email)
         if invited_user:
             inviter_user = await UserRepository.get_by_id(db, invited_by)
-            inviter_name = f"{inviter_user.first_name} {inviter_user.last_name}" if inviter_user.last_name else inviter_user.first_name
+            inviter_name = inviter_user.full_name or inviter_user.email
             org = await OrgRepository.get_by_id(db, org_id)
             NotificationService.create_notification(
                 org_id=org_id,

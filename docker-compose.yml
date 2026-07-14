@@ -1,4 +1,28 @@
 services:
+
+  localstack:
+    image: localstack/localstack:3.0
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEBUG=1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_REGION=us-east-1
+      - FILES_BUCKET=test-bucket
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DATA_DIR=/var/lib/localstack
+    volumes:
+      - ./localstack-data:/var/lib/localstack
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./scripts/cors.json:/etc/localstack/init/ready.d/cors.json"
+      - "./scripts/init-localstack.sh:/etc/localstack/init/ready.d/init-localstack.sh"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4566/_localstack/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   postgres:
     image: postgres:15.3-alpine
     container_name: flowdesk_postgres
@@ -47,6 +71,15 @@ services:
       - JWT_ALGORITHM=${JWT_ALGORITHM}
       - ACCESS_TOKEN_EXPIRY=${ACCESS_TOKEN_EXPIRY}
       - REFRESH_TOKEN_EXPIRY=${REFRESH_TOKEN_EXPIRY}
+      - STORAGE_BACKEND=s3
+      - STORAGE_LOCAL_DIR=uploads
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_REGION=us-east-1
+      - FILES_BUCKET=test-bucket
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - MIN_PART_SIZE_BYTES=5242880
+      - ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,doc,docx,xls,xlsx,csv,txt,zip
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres:
@@ -68,6 +101,15 @@ services:
       - JWT_ALGORITHM=${JWT_ALGORITHM}
       - ACCESS_TOKEN_EXPIRY=${ACCESS_TOKEN_EXPIRY}
       - REFRESH_TOKEN_EXPIRY=${REFRESH_TOKEN_EXPIRY}
+      - STORAGE_BACKEND=s3
+      - STORAGE_LOCAL_DIR=uploads
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_REGION=us-east-1
+      - FILES_BUCKET=test-bucket
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - MIN_PART_SIZE_BYTES=5242880
+      - ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,doc,docx,xls,xlsx,csv,txt,zip
     command: celery -A app.workers.celery_app worker --loglevel=info -P solo
     depends_on:
       postgres:
