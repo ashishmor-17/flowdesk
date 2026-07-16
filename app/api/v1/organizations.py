@@ -11,7 +11,7 @@ from app.models.users import User
 from app.models.org_members import OrgMember
 from app.models.teams import Team
 from app.models.team_members import TeamMember
-from app.schemas.teams import TeamCreate, TeamResponse, TeamMemberAdd, TeamMemberResponse
+from app.schemas.teams import TeamCreate, TeamResponse, TeamMemberAdd, TeamMemberResponse, TeamDetailResponse
 from app.schemas.organization import *
 from app.services import org_service, team_service, sla_service
 from app.schemas.sla import SLAPolicyCreate, SLAPolicyResponse
@@ -140,6 +140,30 @@ async def delete_member(
 
     return {"message": "Member removed."}
 
+@router.patch("/members/{user_id}/role", response_model=OrgMemberResponse, status_code=status.HTTP_200_OK)
+async def update_member_role(
+    user_id: uuid.UUID,
+    payload: UpdateMemberRoleRequest,
+    org_id: uuid.UUID = Depends(get_current_org_id),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    member = await org_service.update_member_role(
+        db=db,
+        org_id=org_id,
+        caller_id=current_user.id,
+        user_id=user_id,
+        new_role=payload.role,
+        action_for_prev_owner=payload.action_for_prev_owner
+    )
+    return OrgMemberResponse(
+        user_id=member.user_id,
+        full_name=member.user.full_name or member.user.email,
+        email=member.user.email,
+        role=member.role.upper(),
+        joined_at=member.joined_at
+    )
+
 @router.delete("", status_code=status.HTTP_200_OK)
 async def delete_org(
     org_id: uuid.UUID = Depends(get_current_org_id),
@@ -188,6 +212,14 @@ async def delete_team(
     db: AsyncSession = Depends(get_db)
 ):
     await team_service.delete_team(db, id, org_member)
+
+@router.get("/teams", response_model=list[TeamDetailResponse], status_code=status.HTTP_200_OK)
+async def list_teams(
+    org_member: OrgMember = Depends(get_org_member),
+    db: AsyncSession = Depends(get_db)
+):
+    return await team_service.list_teams(db, org_member)
+
 
 @router.post("/sla-policies", response_model=SLAPolicyResponse, status_code=status.HTTP_201_CREATED)
 async def create_sla_policy(

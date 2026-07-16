@@ -120,3 +120,17 @@ async def decide_approval_request(
     )
 
     return approval
+
+async def list_approvals(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    task_id: uuid.UUID
+) -> list:
+    task = await TaskRepository.get_by_id(db, org_id, task_id)
+    if not task or task.org_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    return await ApprovalRepository.get_by_task(db, task_id)
+

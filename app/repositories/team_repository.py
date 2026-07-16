@@ -51,3 +51,11 @@ class TeamRepository:
             select(TeamMember.user_id).where(TeamMember.team_id == team_id)
         )
         return list(result.all())
+
+    @staticmethod
+    async def list_org_teams(db: AsyncSession, org_id: uuid.UUID) -> list[Team]:
+        result = await db.scalars(
+            select(Team).where(Team.org_id == org_id)
+        )
+        return list(result.all())
+

@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     MIN_PART_SIZE_BYTES: int = 5 * 1024 * 1024 # 5MB default
     ALLOWED_EXTENSIONS: str = "pdf,png,jpg,jpeg,doc,docx,xls,xlsx,csv,txt,zip"
 
+    # SMTP Email Settings
+    SMTP_HOST: str = "mailpit"
+    SMTP_PORT: int = 1025
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM: str = "no-reply@flowdesk.com"
+
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

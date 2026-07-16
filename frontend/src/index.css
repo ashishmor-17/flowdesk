@@ -192,6 +192,23 @@ button, input, select, textarea {
   box-shadow: var(--shadow-neon);
 }
 
+select.input-field {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a5b4fc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+  padding-right: 40px !important;
+  cursor: pointer;
+}
+
+select.input-field option {
+  background-color: #0c0b14 !important;
+  color: #f8fafc !important;
+}
+
 /* Animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
@@ -234,4 +251,8 @@ button, input, select, textarea {
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.3);
   color: #f87171;
+}
+
+.task-row-hover:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
 }

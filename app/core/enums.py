@@ -40,12 +40,14 @@ class NotificationType(StrEnum):
     SLA_BREACHED = "sla_breached"
     APPROVAL_REQUESTED = "approval_requested"
     APPROVAL_DECIDED = "approval_decided"
+    ROLE_CHANGED = "role_changed"
 
 class NotificationEntityType(StrEnum):
     TASK = "task"
     COMMENT = "comment"
     INVITATION = "invitation"
     APPROVAL_REQUEST = "approval_request"
+    ORGANIZATION = "organization"
 
 class AutomationTriggerEvent(StrEnum):
     TASK_CREATED = "TASK_CREATED"

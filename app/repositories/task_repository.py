@@ -114,7 +114,8 @@ class TaskRepository:
         description: str | None = None,
         priority: TaskPriority = TaskPriority.MEDIUM,
         due_date: date | None = None,
-        created_by: uuid.UUID
+        created_by: uuid.UUID,
+        status: str = None
     ) -> Task:
         
         task = Task(
@@ -126,6 +127,8 @@ class TaskRepository:
             due_date=due_date,
             created_by=created_by
         )
+        if status is not None:
+            task.status = status
         db.add(task)
         await db.flush()
         return task

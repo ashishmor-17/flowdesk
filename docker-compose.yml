@@ -80,7 +80,14 @@ services:
       - AWS_ENDPOINT_URL=http://localstack:4566
       - MIN_PART_SIZE_BYTES=5242880
       - ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,doc,docx,xls,xlsx,csv,txt,zip
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_USER=
+      - SMTP_PASSWORD=
+      - SMTP_FROM=no-reply@flowdesk.com
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./app:/app/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,7 +117,14 @@ services:
       - AWS_ENDPOINT_URL=http://localstack:4566
       - MIN_PART_SIZE_BYTES=5242880
       - ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,doc,docx,xls,xlsx,csv,txt,zip
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_USER=
+      - SMTP_PASSWORD=
+      - SMTP_FROM=no-reply@flowdesk.com
     command: celery -A app.workers.celery_app worker --loglevel=info -P solo
+    volumes:
+      - ./app:/app/app
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,6 +141,15 @@ services:
       - "3000:3000"
     depends_on:
       - api
+
+  mailpit:
+    image: axllent/mailpit:v1.15
+    container_name: flowdesk_mailpit
+    restart: always
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
 
 volumes:
   postgres_data:

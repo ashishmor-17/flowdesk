@@ -25,3 +25,7 @@ class TeamMemberResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class TeamDetailResponse(TeamResponse):
+    member_ids: list[uuid.UUID]
+

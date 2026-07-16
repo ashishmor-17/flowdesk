@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from app.core.enums import TaskStatus, TaskPriority
 from app.schemas.task_link import TaskLinkResponse
@@ -46,6 +46,10 @@ class TaskResponse(TaskBase):
     sla_deadline: datetime | None = None
     total_minutes_logged: int = 0
     links: list[TaskLinkResponse] = []
+
+    @field_serializer("status")
+    def serialize_status(self, status: str) -> str:
+        return status.upper().replace("_", " ")
 
     class Config:
         from_attributes = True

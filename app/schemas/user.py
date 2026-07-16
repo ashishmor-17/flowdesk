@@ -48,3 +48,4 @@ class MeResponse(UserResponse):
     unread_notifications_count: int
     org_id: uuid.UUID | None = None
     org_name: str | None = None
+    role: str | None = None

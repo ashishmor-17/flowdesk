@@ -52,6 +52,17 @@ export const AuthProvider = ({ children }) => {
       const data = await api.auth.login(email, password);
       localStorage.setItem('access_token', data.access_token);
       localStorage.setItem('refresh_token', data.refresh_token);
+      
+      const inviteToken = sessionStorage.getItem('invite_token');
+      if (inviteToken) {
+        try {
+          await api.org.acceptInvite(inviteToken);
+          sessionStorage.removeItem('invite_token');
+        } catch (inviteErr) {
+          console.error('Auto-accept invite failed:', inviteErr);
+        }
+      }
+
       await fetchProfileAndOrgs();
       return data;
     } catch (err) {
@@ -66,6 +77,17 @@ export const AuthProvider = ({ children }) => {
       const data = await api.auth.signup(email, password, firstName, lastName);
       localStorage.setItem('access_token', data.access_token);
       localStorage.setItem('refresh_token', data.refresh_token);
+      
+      const inviteToken = sessionStorage.getItem('invite_token');
+      if (inviteToken) {
+        try {
+          await api.org.acceptInvite(inviteToken);
+          sessionStorage.removeItem('invite_token');
+        } catch (inviteErr) {
+          console.error('Auto-accept invite failed:', inviteErr);
+        }
+      }
+
       await fetchProfileAndOrgs();
       return data;
     } catch (err) {

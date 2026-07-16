@@ -42,6 +42,12 @@ async def create_task(
                 }
             )
 
+        statuses = await ProjectStatusRepository.list_by_project(db, task_in.project_id)
+        default_status = TaskStatus.TODO
+        if statuses:
+            sorted_statuses = sorted(statuses, key=lambda s: s.position)
+            default_status = sorted_statuses[0].name
+
         task = await TaskRepository.create(
             db,
             project_id=task_in.project_id,
@@ -50,7 +56,8 @@ async def create_task(
             description=task_in.description,
             priority=task_in.priority,
             due_date=task_in.due_date,
-            created_by=creator_id
+            created_by=creator_id,
+            status=default_status
         )
 
         from app.services.event_service import fire_task_event
@@ -217,7 +224,14 @@ async def update_task_status(
         if not valid_status_names:
             valid_status_names = [TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.REVIEW, TaskStatus.DONE]
             
-        if new_status not in valid_status_names:
+        matched_status = None
+        target_norm = new_status.upper().replace("_", " ").strip()
+        for vname in valid_status_names:
+            if vname.upper().replace("_", " ").strip() == target_norm:
+                matched_status = vname
+                break
+
+        if matched_status is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={
@@ -225,6 +239,7 @@ async def update_task_status(
                     "message": f"Status '{new_status}' does not exist in this project."
                 }
             )
+        new_status = matched_status
 
         rules = await WorkflowRuleRepository.list_by_project(db, task.project_id)
         
