@@ -63,7 +63,7 @@ class CommentRepository:
                 selectinload(Comment.author),
                 selectinload(Comment.mentions)
             )
-            .order_by(Comment.created_at.asc(), Comment.id.asc())
+            .order_by(Comment.created_at.desc(), Comment.id.desc())
         )
 
         if cursor:
@@ -75,10 +75,10 @@ class CommentRepository:
 
                 query = query.where(
                     or_(
-                        Comment.created_at > cursor_time,
+                        Comment.created_at < cursor_time,
                         and_(
                             Comment.created_at == cursor_time,
-                            Comment.id > cursor_id
+                            Comment.id < cursor_id
                         )
                     )
                 )
@@ -112,7 +112,10 @@ class CommentRepository:
             .join(OrgMember, OrgMember.user_id == User.id)
             .where(
                 OrgMember.org_id == org_id,
-                func.split_part(User.email, "@", 1).in_(usernames)
+                or_(
+                    func.split_part(User.email, "@", 1).in_(usernames),
+                    User.email.in_(usernames)
+                )
             )
         )
         res = await db.execute(query)

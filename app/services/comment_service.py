@@ -17,7 +17,13 @@ from app.repositories.task_watcher_repository import TaskWatcherRepository
 from app.services.audit_service import AuditService
 
 async def extract_mentions(content: str) -> list[str]:
-    return re.findall(r'@([a-zA-Z0-9_.-]+)', content)
+    mentions = []
+    for word in content.split():
+        if word.startswith('@') and len(word) > 1:
+            mention = word[1:].rstrip('.,!?;:)("')
+            if mention:
+                mentions.append(mention)
+    return mentions
 
 async def create_comment(
         db: AsyncSession,

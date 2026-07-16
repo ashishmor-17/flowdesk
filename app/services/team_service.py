@@ -115,3 +115,22 @@ async def delete_team(
 
     async with transaction_scope(db):
         await TeamRepository.delete(db, team)
+
+async def list_teams(
+    db: AsyncSession,
+    org_member: OrgMember
+) -> list[dict]:
+    
+    teams = await TeamRepository.list_org_teams(db, org_member.org_id)
+    team_details = []
+    for team in teams:
+        member_ids = await TeamRepository.list_member_ids(db, team.id)
+        team_details.append({
+            "id": team.id,
+            "org_id": team.org_id,
+            "name": team.name,
+            "created_at": team.created_at,
+            "member_ids": member_ids
+        })
+    return team_details
+

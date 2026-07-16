@@ -63,3 +63,14 @@ class OrgMemberResponse(BaseModel):
 class OrgMembersListResponse(BaseModel):
     members: list[OrgMemberResponse]
 
+class UpdateMemberRoleRequest(BaseModel):
+    role: UserRole
+    action_for_prev_owner: str | None = "admin"
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def normalize_role(cls, v: Any) -> str:
+        if isinstance(v, str):
+            return v.lower()
+        return v
+

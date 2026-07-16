@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { api } from '../services/api';
+import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
+import { getPriorityColor, formatDate } from '../../utils/format';
 import { 
   Plus, 
   Calendar, 
@@ -13,7 +14,7 @@ import {
 } from 'lucide-react';
 import TaskDetailModal from './TaskDetailModal';
 
-export default function KanbanBoard() {
+export default function TaskBoard({ initialOpenTaskId, onClearInitialOpenTaskId }) {
   const { activeOrg } = useAuth();
   const [projects, setProjects] = useState([]);
   const [selectedProjId, setSelectedProjId] = useState('');
@@ -31,13 +32,15 @@ export default function KanbanBoard() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  const columns = [
-    { id: 'backlog', title: 'Backlog', color: '#6b7280' },
+  const defaultColumns = [
     { id: 'todo', title: 'To Do', color: '#3b82f6' },
     { id: 'in_progress', title: 'In Progress', color: '#f59e0b' },
     { id: 'review', title: 'Review', color: '#a855f7' },
     { id: 'done', title: 'Done', color: '#10b981' }
   ];
+
+  const [boardColumns, setBoardColumns] = useState(defaultColumns);
+  const [orgMembers, setOrgMembers] = useState([]);
 
   const fetchProjects = async () => {
     try {
@@ -49,6 +52,48 @@ export default function KanbanBoard() {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const fetchMembers = async () => {
+    try {
+      const data = await api.org.getMembers();
+      setOrgMembers(data.members || data || []);
+    } catch (err) {
+      console.error('Failed to fetch org members:', err);
+    }
+  };
+
+  const getAssigneeNames = (task) => {
+    if (!task.assignees || task.assignees.length === 0) return 'Unassigned';
+    return task.assignees.map(a => {
+      const member = orgMembers.find(m => (m.user_id || m.id) === a.user_id);
+      return member ? (member.full_name || member.email) : 'Unknown User';
+    }).join(', ');
+  };
+
+  const getReporterName = (task) => {
+    const member = orgMembers.find(m => (m.user_id || m.id) === task.created_by);
+    return member ? (member.full_name || member.email) : 'Unknown User';
+  };
+
+  const fetchProjectStatuses = async () => {
+    if (!selectedProjId) return;
+    try {
+      const data = await api.projects.getStatuses(selectedProjId);
+      if (data && data.length > 0) {
+        const sorted = [...data].sort((a, b) => a.position - b.position);
+        setBoardColumns(sorted.map(st => ({
+          id: st.name,
+          title: st.name,
+          color: st.color || '#6366f1'
+        })));
+      } else {
+        setBoardColumns(defaultColumns);
+      }
+    } catch (err) {
+      console.error(err);
+      setBoardColumns(defaultColumns);
     }
   };
 
@@ -67,11 +112,39 @@ export default function KanbanBoard() {
 
   useEffect(() => {
     fetchProjects();
+    fetchMembers();
   }, [activeOrg]);
 
   useEffect(() => {
-    fetchTasks();
+    if (selectedProjId) {
+      fetchTasks();
+      fetchProjectStatuses();
+    }
   }, [selectedProjId]);
+
+  useEffect(() => {
+    if (initialOpenTaskId) {
+      const existingTask = tasks.find(t => t.id === initialOpenTaskId);
+      if (existingTask) {
+        setSelectedTask(existingTask);
+        if (onClearInitialOpenTaskId) onClearInitialOpenTaskId();
+      } else {
+        api.tasks.get(initialOpenTaskId).then(t => {
+          if (t) {
+            // Check if project needs to be set
+            if (t.project_id && t.project_id !== selectedProjId) {
+              setSelectedProjId(t.project_id);
+            }
+            setSelectedTask(t);
+          }
+          if (onClearInitialOpenTaskId) onClearInitialOpenTaskId();
+        }).catch(err => {
+          console.error("Failed to fetch initialOpenTaskId:", err);
+          if (onClearInitialOpenTaskId) onClearInitialOpenTaskId();
+        });
+      }
+    }
+  }, [initialOpenTaskId, tasks, selectedProjId]);
 
   const handleCreateTask = async (e) => {
     e.preventDefault();
@@ -102,15 +175,6 @@ export default function KanbanBoard() {
     } catch (err) {
       setError(err.message || 'Failed to update status');
       setTimeout(() => setError(''), 3000);
-    }
-  };
-
-  const getPriorityColor = (priority) => {
-    switch (priority) {
-      case 'high': return '#ef4444';
-      case 'medium': return '#f59e0b';
-      case 'low': return '#10b981';
-      default: return 'var(--text-secondary)';
     }
   };
 
@@ -162,76 +226,85 @@ export default function KanbanBoard() {
       ) : loading ? (
         <div style={{ textAlign: 'center', padding: '40px', flexGrow: 1 }}>Loading task board...</div>
       ) : (
-        <div className="kanban-container" style={{ display: 'flex', gap: '16px', overflowX: 'auto', flexGrow: 1 }}>
-          {columns.map(col => {
-            const colTasks = tasks.filter(t => t.status === col.id);
-            return (
-              <div key={col.id} className="kanban-column" style={{ flex: '1 0 280px', display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.015)', border: '1px solid var(--border-glass)', borderRadius: '12px', padding: '16px', maxHeight: '100%', overflow: 'hidden' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: col.color }} />
-                    <h3 style={{ fontSize: '15px', fontWeight: '700' }}>{col.title}</h3>
-                  </div>
-                  <span style={{ fontSize: '11px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', padding: '2px 8px', borderRadius: '12px' }}>
-                    {colTasks.length}
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flexGrow: 1, paddingRight: '4px' }}>
-                  {colTasks.map(task => (
-                    <div 
+        <div className="glass-panel" style={{ overflow: 'hidden', flexGrow: 1, display: 'flex', flexDirection: 'column', padding: 0 }}>
+          <div style={{ overflowY: 'auto', flexGrow: 1 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-glass)', background: 'rgba(255,255,255,0.02)' }}>
+                  <th style={{ padding: '16px', fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Task</th>
+                  <th style={{ padding: '16px', fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
+                  <th style={{ padding: '16px', fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Priority</th>
+                  <th style={{ padding: '16px', fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Due Date</th>
+                  <th style={{ padding: '16px', fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Assignees</th>
+                  <th style={{ padding: '16px', fontSize: '13px', fontWeight: '700', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Reporter</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map(task => {
+                  const statusStr = task.status ? task.status.toUpperCase().replace('_', ' ') : 'TODO';
+                  const priorityColor = getPriorityColor(task.priority);
+                  return (
+                    <tr 
                       key={task.id} 
-                      className="glass-card" 
-                      style={{ padding: '14px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '10px' }}
+                      className="task-row-hover"
+                      style={{ 
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.03)', 
+                        cursor: 'pointer', 
+                        transition: 'background 0.2s' 
+                      }}
                       onClick={() => setSelectedTask(task)}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <span style={{ fontSize: '10px', textTransform: 'uppercase', color: getPriorityColor(task.priority), fontWeight: '700', letterSpacing: '0.05em' }}>
+                      <td style={{ padding: '16px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>{task.title}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Version {task.version}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '16px' }}>
+                        <span style={{ 
+                          fontSize: '11px', 
+                          fontWeight: '700', 
+                          background: 'rgba(99, 102, 241, 0.1)', 
+                          color: '#818cf8', 
+                          padding: '4px 10px', 
+                          borderRadius: '12px',
+                          border: '1px solid rgba(99, 102, 241, 0.2)',
+                          letterSpacing: '0.03em'
+                        }}>
+                          {statusStr}
+                        </span>
+                      </td>
+                      <td style={{ padding: '16px' }}>
+                        <span style={{ 
+                          fontSize: '11px', 
+                          fontWeight: '700', 
+                          color: priorityColor, 
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em'
+                        }}>
                           {task.priority}
                         </span>
-                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                          v{task.version}
-                        </span>
-                      </div>
-
-                      <h4 style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', lineHeight: '1.4' }}>{task.title}</h4>
-                      
-                      {task.due_date && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                          <Clock size={12} />
-                          <span>{new Date(task.due_date).toLocaleDateString()}</span>
-                        </div>
-                      )}
-
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '8px', gap: '4px' }} onClick={e => e.stopPropagation()}>
-                        <select
-                          className="input-field"
-                          style={{ width: '100%', fontSize: '11px', padding: '4px 8px', background: 'rgba(255,255,255,0.02)' }}
-                          value={task.status}
-                          onChange={(e) => handleQuickStatusChange(task.id, e.target.value)}
-                        >
-                          {columns.map(c => (
-                            <option key={c.id} value={c.id}>{c.title}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  {col.id === 'todo' && (
-                    <button 
-                      onClick={() => { setAddTaskColumn('todo'); setShowAddTaskModal(true); }}
-                      style={{ background: 'transparent', border: '1px dashed var(--border-glass)', borderRadius: '8px', padding: '10px', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', width: '100%', transition: 'all 0.2s' }}
-                      onMouseOver={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'}
-                      onMouseOut={e => e.currentTarget.style.borderColor = 'var(--border-glass)'}
-                    >
-                      <Plus size={14} /> Add Task
-                    </button>
-                  )}
-                </div>
+                      </td>
+                      <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        {task.due_date ? formatDate(task.due_date) : '-'}
+                      </td>
+                      <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        {getAssigneeNames(task)}
+                      </td>
+                      <td style={{ padding: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        {getReporterName(task)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {tasks.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+                No tasks created in this project yet. Click "+ Add Task" to get started!
               </div>
-            );
-          })}
+            )}
+          </div>
         </div>
       )}
 

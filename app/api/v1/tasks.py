@@ -425,6 +425,16 @@ async def decide_approval_route(
     )
 
 
+@router.get("/{id}/approvals", response_model=list[ApprovalRequestResponse], status_code=status.HTTP_200_OK)
+async def list_approvals_route(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    org_member: OrgMember = Depends(get_org_member)
+):
+    return await approval_service.list_approvals(db, org_member.org_id, id)
+
+
+
 @router.post("/{id}/time-entries", response_model=TimeEntryResponse, status_code=status.HTTP_201_CREATED)
 async def log_time_route(
     id: uuid.UUID,

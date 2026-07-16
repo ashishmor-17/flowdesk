@@ -10,6 +10,10 @@ async function request(endpoint, options = {}) {
     ...options.headers,
   };
 
+  if (headers['Content-Type'] === undefined) {
+    delete headers['Content-Type'];
+  }
+
   const response = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
     headers,
@@ -88,6 +92,15 @@ export const api = {
         body: JSON.stringify({ name, slug })
       }),
     getMembers: () => request('/org/members'),
+    removeMember: (userId) =>
+      request(`/org/members/${userId}`, {
+        method: 'DELETE'
+      }),
+    updateMemberRole: (userId, role, actionForPrevOwner = 'admin') =>
+      request(`/org/members/${userId}/role`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role, action_for_prev_owner: actionForPrevOwner })
+      }),
     invite: (email, role) =>
       request('/org/invite-user', {
         method: 'POST',
@@ -98,6 +111,33 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ token })
       }),
+    listTeams: () => request('/org/teams'),
+    createTeam: (name) =>
+      request('/org/teams', {
+        method: 'POST',
+        body: JSON.stringify({ name })
+      }),
+    addTeamMember: (teamId, userId) =>
+      request(`/org/teams/${teamId}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ user_id: userId })
+      }),
+    removeTeamMember: (teamId, userId) =>
+      request(`/org/teams/${teamId}/members/${userId}`, {
+        method: 'DELETE'
+      }),
+    deleteTeam: (teamId) =>
+      request(`/org/teams/${teamId}`, {
+        method: 'DELETE'
+      }),
+    createSLAPolicy: (policyData) =>
+      request('/org/sla-policies', {
+        method: 'POST',
+        body: JSON.stringify(policyData)
+      }),
+    listSLAPolicies: () => request('/org/sla-policies'),
+    getAuditLogs: () => request('/org/audit-logs'),
+    delete: () => request('/org', { method: 'DELETE' }),
   },
   projects: {
     list: () => request('/projects'),
@@ -106,10 +146,27 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ name, description, color })
       }),
+    get: (projectId) => request(`/projects/${projectId}`),
+    update: (projectId, projectData) =>
+      request(`/projects/${projectId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(projectData)
+      }),
     archive: (projectId) =>
-      request(`/projects/${projectId}/archive`, { method: 'POST' }),
+      request(`/projects/${projectId}/archive`, { method: 'PATCH' }),
     delete: (projectId, cascade = false) =>
       request(`/projects/${projectId}?cascade=${cascade}`, { method: 'DELETE' }),
+    getStatuses: (projectId) => request(`/projects/${projectId}/statuses`),
+    createStatus: (projectId, statusData) =>
+      request(`/projects/${projectId}/statuses`, {
+        method: 'POST',
+        body: JSON.stringify(statusData)
+      }),
+    createWorkflowRule: (projectId, ruleData) =>
+      request(`/projects/${projectId}/workflow-rules`, {
+        method: 'POST',
+        body: JSON.stringify(ruleData)
+      }),
   },
   tasks: {
     list: (orgId, projectId, status) => {
@@ -123,6 +180,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ project_id: projectId, title, description, priority, due_date })
       }),
+    get: (taskId) => request(`/tasks/${taskId}`),
     update: (taskId, updateData) =>
       request(`/tasks/${taskId}`, {
         method: 'PATCH',
@@ -133,8 +191,91 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ status, version })
       }),
+    assign: (taskId, userId) =>
+      request(`/tasks/${taskId}/assign`, {
+        method: 'PATCH',
+        body: JSON.stringify({ assigned_to: userId })
+      }),
+    addAssignee: (taskId, assigneeData) =>
+      request(`/tasks/${taskId}/assignees`, {
+        method: 'POST',
+        body: JSON.stringify(assigneeData)
+      }),
+    watch: (taskId) =>
+      request(`/tasks/${taskId}/watchers`, { method: 'POST' }),
+    unwatch: (taskId, userId) =>
+      request(`/tasks/${taskId}/watchers/${userId}`, { method: 'DELETE' }),
     delete: (taskId) =>
       request(`/tasks/${taskId}`, { method: 'DELETE' }),
+    listAttachments: (taskId) =>
+      request(`/tasks/${taskId}/attachments`),
+    uploadAttachment: (taskId, file) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return request(`/tasks/${taskId}/attachments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': undefined
+        },
+        body: formData
+      });
+    },
+    deleteAttachment: (taskId, attachmentId) =>
+      request(`/tasks/${taskId}/attachments/${attachmentId}`, {
+        method: 'DELETE'
+      }),
+    getDownloadUrl: (taskId, attachmentId) =>
+      `${BASE_URL}/tasks/${taskId}/attachments/${attachmentId}/download?token=${localStorage.getItem('access_token')}`,
+    initiateUpload: (taskId, initiateData) =>
+      request(`/tasks/${taskId}/attachments/upload/initiate`, {
+        method: 'POST',
+        body: JSON.stringify(initiateData)
+      }),
+    uploadPart: (taskId, sessionId, partNumber, file) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return request(`/tasks/${taskId}/attachments/upload/${sessionId}/parts?part_number=${partNumber}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': undefined
+        },
+        body: formData
+      });
+    },
+    completeUpload: (taskId, sessionId) =>
+      request(`/tasks/${taskId}/attachments/upload/${sessionId}/complete`, { method: 'POST' }),
+    abortUpload: (taskId, sessionId) =>
+      request(`/tasks/${taskId}/attachments/upload/${sessionId}/abort`, { method: 'POST' }),
+    getUploadProgress: (taskId, sessionId) =>
+      request(`/tasks/${taskId}/attachments/upload/${sessionId}`),
+    createApproval: (taskId, approverId) =>
+      request(`/tasks/${taskId}/approvals`, {
+        method: 'POST',
+        body: JSON.stringify({ approver_id: approverId })
+      }),
+    listApprovals: (taskId) =>
+      request(`/tasks/${taskId}/approvals`),
+    updateApproval: (taskId, approvalId, status, comment = null) =>
+      request(`/tasks/${taskId}/approvals/${approvalId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, comment })
+      }),
+    createTimeEntry: (taskId, minutes, description = null) =>
+      request(`/tasks/${taskId}/time-entries`, {
+        method: 'POST',
+        body: JSON.stringify({ minutes, description })
+      }),
+    listTimeEntries: (taskId) =>
+      request(`/tasks/${taskId}/time-entries`),
+    createLink: (taskId, linkData) =>
+      request(`/tasks/${taskId}/links`, {
+        method: 'POST',
+        body: JSON.stringify(linkData)
+      }),
+    deleteLink: (taskId, linkId) =>
+      request(`/tasks/${taskId}/links/${linkId}`, { method: 'DELETE' }),
+    getActivity: (taskId) =>
+      request(`/tasks/${taskId}/activity`),
   },
   comments: {
     list: (taskId, limit = 20, cursor = null) => {
@@ -147,6 +288,13 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ content })
       }),
+    update: (commentId, content) =>
+      request(`/comments/${commentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ content })
+      }),
+    delete: (commentId) =>
+      request(`/comments/${commentId}`, { method: 'DELETE' }),
   },
   notifications: {
     list: (limit = 20, cursor = null) => {
@@ -168,9 +316,32 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(ruleData)
       }),
+    get: (id) => request(`/automation/rules/${id}`),
+    update: (id, ruleData) =>
+      request(`/automation/rules/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(ruleData)
+      }),
     delete: (id) => request(`/automation/rules/${id}`, { method: 'DELETE' }),
+    getHistory: (id) => request(`/automation/rules/${id}/history`),
   },
   users: {
     listAll: () => request('/users'),
+    getProfile: () => request('/users/me'),
+    updateProfile: (profileData) =>
+      request('/users/me', {
+        method: 'PATCH',
+        body: JSON.stringify(profileData)
+      }),
+    changePassword: (oldPassword, newPassword) =>
+      request('/users/me/password', {
+        method: 'POST',
+        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
+      }),
+    updatePreferences: (preferences) =>
+      request('/users/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ preferences })
+      })
   }
 };

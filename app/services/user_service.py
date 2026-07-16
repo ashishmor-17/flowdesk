@@ -16,6 +16,7 @@ async def get_me_details(db: AsyncSession, user: User) -> User:
     org_member = await UserRepository.get_user_org_membership(db, user.id)
     user.org_id = org_member.org_id if org_member else None
     user.org_name = org_member.org.name if org_member and org_member.org else None
+    user.role = org_member.role.value.upper() if org_member and hasattr(org_member.role, 'value') else (str(org_member.role).upper() if org_member else None)
     return user
 
 async def update_user_preferences(

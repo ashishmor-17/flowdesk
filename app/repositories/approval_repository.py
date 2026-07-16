@@ -43,3 +43,14 @@ class ApprovalRepository:
                 ApprovalRequest.task_id == task_id
             )
         )
+
+    @staticmethod
+    async def get_by_task(
+        db: AsyncSession,
+        task_id: uuid.UUID
+    ) -> list[ApprovalRequest]:
+        result = await db.scalars(
+            select(ApprovalRequest).where(ApprovalRequest.task_id == task_id)
+        )
+        return list(result.all())
+
