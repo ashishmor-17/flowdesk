@@ -1,4 +1,4 @@
-# Flowdesk — Multi-Tenant Collaborative Workflow & Project Management
+# Flowdesk - Multi-Tenant Collaborative Workflow & Project Management
 
 Flowdesk is a high-performance, multi-tenant collaborative workflow and project management system designed with a microservices-ready layered architecture. It integrates Agile project management elements (similar to Jira and Trello) with Slack-like user mentions, real-time unread notifications, custom workflow engines, and automated SLA (Service Level Agreement) monitors.
 
@@ -25,7 +25,7 @@ Flowdesk is a high-performance, multi-tenant collaborative workflow and project 
 * **Work Management**: Supports complete task CRUD operations containing priority queues (`low`, `medium`, `high`, `urgent`), due dates, categories, and multiple assignees.
 * **Collaborative Watchers**: Users can subscribe as watchers (`task_watchers`) to get automatic event streams about changes to task status, attachments, or comments.
 * **Inter-Task Dependencies**: Supports linking tasks through relations (`task_links`) such as `BLOCKS`, `BLOCKED_BY`, and `RELATES_TO`.
-* **Regex Mention Engine**: Automatically parses comments (e.g., `"Need eyes on this, @jane_doe"`) for organization member mentions. Validated mentions trigger instant background notifications and log database associations (`comment_mentions`).
+* **Regex Mention Engine**: Automatically parses comments for organization member mentions. Validated mentions trigger instant background notifications and log database associations (`comment_mentions`).
 * **Time Tracking**: Log work durations (`time_entries`) on tasks with aggregated reports on task views.
 
 ### 📁 5. Large File Chunked Uploads
@@ -98,165 +98,6 @@ flowdesk/
 └── Readme.md                 # This document
 ```
 
----
-
-## 🛢️ Entity-Relationship (ER) Diagram
-
-```mermaid
-erDiagram
-    USERS {
-        UUID id PK
-        TEXT email UK
-        TEXT hashed_password
-        TEXT full_name
-        BOOLEAN is_active
-    }
-
-    ORGANIZATIONS {
-        UUID id PK
-        TEXT name
-        TEXT slug UK
-        UUID created_by FK
-    }
-
-    ORG_MEMBERS {
-        UUID id PK
-        UUID org_id FK
-        UUID user_id FK
-        TEXT role
-    }
-
-    INVITATIONS {
-        UUID id PK
-        UUID org_id FK
-        UUID invited_by FK
-    }
-
-    REFRESH_TOKENS {
-        UUID id PK
-        UUID user_id FK
-    }
-
-    PROJECTS {
-        UUID id PK
-        UUID org_id FK
-        UUID created_by FK
-    }
-
-    TASKS {
-        UUID id PK
-        UUID project_id FK
-        UUID org_id FK
-        UUID created_by FK
-    }
-
-    TASK_ASSIGNEES {
-        UUID task_id PK,FK
-        UUID user_id PK,FK
-        UUID assigned_by FK
-    }
-
-    TASK_LABELS {
-        UUID id PK
-        UUID task_id FK
-    }
-
-    COMMENTS {
-        UUID id PK
-        UUID task_id FK
-        UUID org_id FK
-        UUID author_id FK
-    }
-
-    COMMENT_MENTIONS {
-        UUID id PK
-        UUID comment_id FK
-        UUID mentioned_user_id FK
-    }
-
-    NOTIFICATIONS {
-        UUID id PK
-        UUID org_id FK
-        UUID recipient_id FK
-        UUID actor_id FK
-    }
-
-    AUTOMATION_RULES {
-        UUID id PK
-        UUID org_id FK
-        UUID project_id FK
-        UUID created_by FK
-    }
-
-    TASK_EVENTS {
-        UUID id PK
-        UUID task_id FK
-        UUID org_id FK
-        UUID actor_id FK
-    }
-
-    ACTIVITY_LOGS {
-        UUID id PK
-        UUID org_id FK
-        UUID actor_id FK
-    }
-
-    AUDIT_LOGS {
-        UUID id PK
-        UUID org_id FK
-        UUID actor_id FK
-    }
-
-    USERS ||--o{ ORGANIZATIONS : creates
-    USERS ||--o{ ORG_MEMBERS : belongs_to
-    ORGANIZATIONS ||--o{ ORG_MEMBERS : contains
-
-    USERS ||--o{ INVITATIONS : sends
-    ORGANIZATIONS ||--o{ INVITATIONS : has
-
-    USERS ||--o{ REFRESH_TOKENS : owns
-
-    ORGANIZATIONS ||--o{ PROJECTS : contains
-    USERS ||--o{ PROJECTS : creates
-
-    PROJECTS ||--o{ TASKS : contains
-    ORGANIZATIONS ||--o{ TASKS : scopes
-    USERS ||--o{ TASKS : creates
-
-    TASKS ||--o{ TASK_ASSIGNEES : assigned_to
-    USERS ||--o{ TASK_ASSIGNEES : receives
-    USERS ||--o{ TASK_ASSIGNEES : assigns
-
-    TASKS ||--o{ TASK_LABELS : has
-
-    TASKS ||--o{ COMMENTS : contains
-    USERS ||--o{ COMMENTS : writes
-    ORGANIZATIONS ||--o{ COMMENTS : scopes
-
-    COMMENTS ||--o{ COMMENT_MENTIONS : contains
-    USERS ||--o{ COMMENT_MENTIONS : mentioned
-
-    USERS ||--o{ NOTIFICATIONS : receives
-    USERS ||--o{ NOTIFICATIONS : triggers
-    ORGANIZATIONS ||--o{ NOTIFICATIONS : scopes
-
-    ORGANIZATIONS ||--o{ AUTOMATION_RULES : owns
-    PROJECTS ||--o{ AUTOMATION_RULES : applies_to
-    USERS ||--o{ AUTOMATION_RULES : creates
-
-    TASKS ||--o{ TASK_EVENTS : generates
-    USERS ||--o{ TASK_EVENTS : triggers
-    ORGANIZATIONS ||--o{ TASK_EVENTS : scopes
-
-    ORGANIZATIONS ||--o{ ACTIVITY_LOGS : contains
-    USERS ||--o{ ACTIVITY_LOGS : performs
-
-    ORGANIZATIONS ||--o{ AUDIT_LOGS : contains
-    USERS ||--o{ AUDIT_LOGS : performs
-```
-
----
-
 ## ⚡ Setup & Installation
 
 ### Prerequisite Check
@@ -308,6 +149,10 @@ If you prefer running the Python API server outside of Docker for active debuggi
    
    pip install -r pyproject.toml
    ```
+   ```
+   If UV is installed and active, use the following command:
+   uv sync -- creates virtual environment and installs dependencies.
+   ```
 3. Run Alembic migrations:
    ```bash
    alembic upgrade head
@@ -315,6 +160,8 @@ If you prefer running the Python API server outside of Docker for active debuggi
 4. Start the FastAPI development server:
    ```bash
    uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+   or
+   uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
    ```
 
 ---
